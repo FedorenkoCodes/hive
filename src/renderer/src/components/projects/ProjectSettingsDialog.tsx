@@ -1,6 +1,6 @@
 import { useState, useEffect, useId } from 'react'
 import { toast } from '@/lib/toast'
-import { Brain, ChevronDown, FolderKanban, FolderPlus, ImageIcon, X } from 'lucide-react'
+import { Brain, ChevronDown, Folder, FolderKanban, FolderPlus, ImageIcon, X } from 'lucide-react'
 import type { SuggestionItem } from '@shared/types/setup-suggestions'
 import {
   Dialog,
@@ -22,6 +22,7 @@ import { LanguageIcon } from './LanguageIcon'
 import { SetupScriptSuggestionsDialog } from './SetupScriptSuggestionsDialog'
 import { unwrapEnvelope } from '@/lib/ipc-envelope'
 import type { CustomProjectCommand } from '@/lib/custom-commands'
+import { formatSelectedKanbanFolder } from './kanban-folder-paths'
 
 interface Project {
   id: string
@@ -192,6 +193,45 @@ export function ProjectSettingsDialog({
       toast.error('Failed to remove icon')
     }
   }
+
+  const handlePickKanbanFolder = async (setFolder: (value: string) => void): Promise<void> => {
+    try {
+      const selectedPath = unwrapEnvelope(await window.kanban.config.pickMarkdownFolder())
+      if (!selectedPath) return
+      setFolder(formatSelectedKanbanFolder(project.path, selectedPath))
+    } catch {
+      toast.error('Failed to choose Kanban folder')
+    }
+  }
+
+  const renderKanbanFolderInput = (
+    label: string,
+    value: string,
+    setValue: (value: string) => void,
+    pickerLabel: string
+  ): React.JSX.Element => (
+    <div className="space-y-1.5">
+      <label className="text-xs font-medium text-muted-foreground">{label}</label>
+      <div className="flex gap-2">
+        <Input
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          className="h-8 min-w-0 flex-1 text-xs"
+        />
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="h-8 w-8 shrink-0"
+          aria-label={pickerLabel}
+          title={pickerLabel}
+          onClick={() => void handlePickKanbanFolder(setValue)}
+        >
+          <Folder className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  )
 
   const buildMarkdownConfig = (): MarkdownConfig =>
     kanbanLayout === 'single-folder'
@@ -407,40 +447,32 @@ export function ProjectSettingsDialog({
                     </div>
 
                     {kanbanLayout === 'single-folder' ? (
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-muted-foreground">Folder</label>
-                        <Input
-                          value={singleFolder}
-                          onChange={(event) => setSingleFolder(event.target.value)}
-                          className="h-8 text-xs"
-                        />
-                      </div>
+                      renderKanbanFolderInput(
+                        'Folder',
+                        singleFolder,
+                        setSingleFolder,
+                        'Choose Kanban folder'
+                      )
                     ) : (
                       <div className="grid gap-2">
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-medium text-muted-foreground">To Do</label>
-                          <Input
-                            value={todoFolder}
-                            onChange={(event) => setTodoFolder(event.target.value)}
-                            className="h-8 text-xs"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-medium text-muted-foreground">In Progress / Review</label>
-                          <Input
-                            value={inProgressFolder}
-                            onChange={(event) => setInProgressFolder(event.target.value)}
-                            className="h-8 text-xs"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-medium text-muted-foreground">Done</label>
-                          <Input
-                            value={doneFolder}
-                            onChange={(event) => setDoneFolder(event.target.value)}
-                            className="h-8 text-xs"
-                          />
-                        </div>
+                        {renderKanbanFolderInput(
+                          'To Do',
+                          todoFolder,
+                          setTodoFolder,
+                          'Choose To Do Kanban folder'
+                        )}
+                        {renderKanbanFolderInput(
+                          'In Progress / Review',
+                          inProgressFolder,
+                          setInProgressFolder,
+                          'Choose In Progress / Review Kanban folder'
+                        )}
+                        {renderKanbanFolderInput(
+                          'Done',
+                          doneFolder,
+                          setDoneFolder,
+                          'Choose Done Kanban folder'
+                        )}
                       </div>
                     )}
 

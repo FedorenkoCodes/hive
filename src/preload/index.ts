@@ -2621,6 +2621,7 @@ const kanban = {
             statusFolders: { todo: string; in_progress: string; done: string }
           }
     ) => invokeEnvelope('kanban:config:createFolders', projectId, config),
+    pickMarkdownFolder: () => invokeEnvelope('kanban:config:pickMarkdownFolder'),
     defaultMarkdown: () => invokeEnvelope('kanban:config:defaultMarkdown')
   },
   diagnostics: {

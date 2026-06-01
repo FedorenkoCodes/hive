@@ -14,7 +14,10 @@ const DEFAULT_MARKDOWN_CONFIG: KanbanMarkdownConfig = {
 }
 
 export function getDefaultMarkdownConfig(): KanbanMarkdownConfig {
-  return { ...DEFAULT_MARKDOWN_CONFIG, statusFolders: { ...DEFAULT_MARKDOWN_CONFIG.statusFolders! } }
+  return {
+    ...DEFAULT_MARKDOWN_CONFIG,
+    statusFolders: { ...DEFAULT_MARKDOWN_CONFIG.statusFolders! }
+  }
 }
 
 export function parseMarkdownConfig(project: Project): KanbanMarkdownConfig {
@@ -43,7 +46,11 @@ export function validateMarkdownConfigShape(config: KanbanMarkdownConfig): void 
     return
   }
   if (config.layout === 'status-folders') {
-    if (!config.statusFolders?.todo || !config.statusFolders.in_progress || !config.statusFolders.done) {
+    if (
+      !config.statusFolders?.todo ||
+      !config.statusFolders.in_progress ||
+      !config.statusFolders.done
+    ) {
       throw new Error('Todo, in-progress, and done folders are required')
     }
     return
@@ -51,7 +58,10 @@ export function validateMarkdownConfigShape(config: KanbanMarkdownConfig): void 
   throw new Error('Invalid markdown Kanban folder layout')
 }
 
-export async function validateConfiguredFolders(project: Project, config: KanbanMarkdownConfig): Promise<void> {
+export async function validateConfiguredFolders(
+  project: Project,
+  config: KanbanMarkdownConfig
+): Promise<void> {
   const folders = await configuredFolders(project, config, false)
   const canonical = await Promise.all(folders.map((folder) => realpath(folder)))
   const stats = await Promise.all(canonical.map((folder) => stat(folder)))
@@ -61,7 +71,8 @@ export async function validateConfiguredFolders(project: Project, config: Kanban
     }
   }
   const unique = new Set(canonical)
-  if (unique.size !== canonical.length) throw new Error('Configured Kanban folders must be distinct')
+  if (unique.size !== canonical.length)
+    throw new Error('Configured Kanban folders must be distinct')
   for (const a of canonical) {
     for (const b of canonical) {
       if (a !== b && relative(a, b) && !relative(a, b).startsWith('..')) {
@@ -111,7 +122,12 @@ export function resolveProjectPath(projectPath: string, configuredPath: string):
 
 export function isMarkdownCandidate(name: string): boolean {
   if (name.startsWith('.')) return false
-  if (name.endsWith('~') || name.endsWith('.tmp') || name.endsWith('.swp') || name.endsWith('.bak')) {
+  if (
+    name.endsWith('~') ||
+    name.endsWith('.tmp') ||
+    name.endsWith('.swp') ||
+    name.endsWith('.bak')
+  ) {
     return false
   }
   const ext = extname(name).toLowerCase()

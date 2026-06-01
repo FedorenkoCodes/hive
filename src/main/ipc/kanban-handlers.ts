@@ -481,6 +481,22 @@ export function registerKanbanHandlers(): void {
       })
   )
 
+  defineHandler('kanban:config:pickMarkdownFolder', z.tuple([]), () =>
+    tryKanbanPromise('kanban:config:pickMarkdownFolder', async () => {
+      const result = await dialog.showOpenDialog({
+        properties: ['openDirectory'],
+        title: 'Choose Kanban Card Folder',
+        buttonLabel: 'Use Folder'
+      })
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return null
+      }
+
+      return result.filePaths[0]
+    })
+  )
+
   defineHandler('kanban:config:defaultMarkdown', z.tuple([]), () =>
     tryKanban('kanban:config:defaultMarkdown', () => getDefaultMarkdownConfig())
   )

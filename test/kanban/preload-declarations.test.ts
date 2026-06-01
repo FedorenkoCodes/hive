@@ -16,6 +16,7 @@ describe('preload declaration contract', () => {
     expect(source).toContain('onChanged: (callback: (event: MarkdownKanbanChangedEvent) => void) => () => void')
     expect(source).toContain('createFolders: (')
     expect(source).toContain('config?: KanbanMarkdownConfig')
+    expect(source).toContain('pickMarkdownFolder: () => Promise<string | null>')
     expect(source).toContain('blocking: true')
   })
 })

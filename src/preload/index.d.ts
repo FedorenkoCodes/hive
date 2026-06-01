@@ -1999,6 +1999,7 @@ declare global {
           projectId: string,
           config?: KanbanMarkdownConfig
         ) => Promise<KanbanStorageConfig>
+        pickMarkdownFolder: () => Promise<string | null>
         defaultMarkdown: () => Promise<KanbanMarkdownConfig>
       }
       diagnostics: {

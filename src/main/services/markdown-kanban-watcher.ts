@@ -54,19 +54,26 @@ export function suppressMarkdownKanbanWatch(
 export async function startMarkdownKanbanProjectWatch(
   projectId: string
 ): Promise<{ success: boolean; error?: string }> {
-  return runProjectWatchOperation(projectId, async () => {
-    const project = getDatabase().getProject(projectId)
-    if (!project) return { success: false, error: `Project not found: ${projectId}` }
+  return runProjectWatchOperation(
+    projectId,
+    async () => {
+      const project = getDatabase().getProject(projectId)
+      if (!project) return { success: false, error: `Project not found: ${projectId}` }
 
-    interestedProjectRefCounts.set(projectId, (interestedProjectRefCounts.get(projectId) ?? 0) + 1)
+      interestedProjectRefCounts.set(
+        projectId,
+        (interestedProjectRefCounts.get(projectId) ?? 0) + 1
+      )
 
-    if (project.kanban_storage_mode !== 'markdown') {
+      if (project.kanban_storage_mode !== 'markdown') {
+        return { success: true }
+      }
+
+      if (!watchers.has(projectId)) await replaceProjectWatch(projectId)
       return { success: true }
-    }
-
-    if (!watchers.has(projectId)) await replaceProjectWatch(projectId)
-    return { success: true }
-  }, 'start')
+    },
+    'start'
+  )
 }
 
 async function runProjectWatchOperation<T>(
@@ -76,15 +83,22 @@ async function runProjectWatchOperation<T>(
 ): Promise<T | { success: boolean; error?: string }> {
   const previous = projectWatchOperations.get(projectId) ?? Promise.resolve()
   const current = previous.catch(() => undefined).then(operation)
-  const tracked = current.then(() => undefined, () => undefined)
+  const tracked = current.then(
+    () => undefined,
+    () => undefined
+  )
   projectWatchOperations.set(projectId, tracked)
   try {
     return await current
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    log.error(`Failed to ${operationName} markdown Kanban watcher`, error instanceof Error ? error : new Error(message), {
-      projectId
-    })
+    log.error(
+      `Failed to ${operationName} markdown Kanban watcher`,
+      error instanceof Error ? error : new Error(message),
+      {
+        projectId
+      }
+    )
     return { success: false, error: message }
   } finally {
     if (projectWatchOperations.get(projectId) === tracked) {
@@ -97,44 +111,56 @@ export async function stopMarkdownKanbanProjectWatch(
   projectId: string,
   options: { force?: boolean } = {}
 ): Promise<{ success: boolean; error?: string }> {
-  return runProjectWatchOperation(projectId, async () => {
-    if (options.force) {
+  return runProjectWatchOperation(
+    projectId,
+    async () => {
+      if (options.force) {
+        interestedProjectRefCounts.delete(projectId)
+        const entry = watchers.get(projectId)
+        if (entry) await closeEntry(projectId, entry)
+        return { success: true }
+      }
+
+      const nextRefCount = Math.max(0, (interestedProjectRefCounts.get(projectId) ?? 0) - 1)
+      if (nextRefCount > 0) {
+        interestedProjectRefCounts.set(projectId, nextRefCount)
+        return { success: true }
+      }
+
       interestedProjectRefCounts.delete(projectId)
       const entry = watchers.get(projectId)
       if (entry) await closeEntry(projectId, entry)
       return { success: true }
-    }
-
-    const nextRefCount = Math.max(0, (interestedProjectRefCounts.get(projectId) ?? 0) - 1)
-    if (nextRefCount > 0) {
-      interestedProjectRefCounts.set(projectId, nextRefCount)
-      return { success: true }
-    }
-
-    interestedProjectRefCounts.delete(projectId)
-    const entry = watchers.get(projectId)
-    if (entry) await closeEntry(projectId, entry)
-    return { success: true }
-  }, 'stop') as Promise<{ success: boolean; error?: string }>
+    },
+    'stop'
+  ) as Promise<{ success: boolean; error?: string }>
 }
 
 export async function deactivateMarkdownKanbanProjectWatch(projectId: string): Promise<void> {
-  await runProjectWatchOperation(projectId, async () => {
-    const entry = watchers.get(projectId)
-    if (entry) await closeEntry(projectId, entry)
-  }, 'deactivate')
+  await runProjectWatchOperation(
+    projectId,
+    async () => {
+      const entry = watchers.get(projectId)
+      if (entry) await closeEntry(projectId, entry)
+    },
+    'deactivate'
+  )
 }
 
 export async function restartMarkdownKanbanProjectWatch(projectId: string): Promise<void> {
-  await runProjectWatchOperation(projectId, async () => {
-    const existing = watchers.get(projectId)
-    if (existing) await closeEntry(projectId, existing)
+  await runProjectWatchOperation(
+    projectId,
+    async () => {
+      const existing = watchers.get(projectId)
+      if (existing) await closeEntry(projectId, existing)
 
-    const project = getDatabase().getProject(projectId)
-    if (!project || project.kanban_storage_mode !== 'markdown') return
-    if ((interestedProjectRefCounts.get(projectId) ?? 0) === 0) return
-    await replaceProjectWatch(projectId)
-  }, 'restart')
+      const project = getDatabase().getProject(projectId)
+      if (!project || project.kanban_storage_mode !== 'markdown') return
+      if ((interestedProjectRefCounts.get(projectId) ?? 0) === 0) return
+      await replaceProjectWatch(projectId)
+    },
+    'restart'
+  )
 }
 
 export function getMarkdownKanbanWatcherCount(): number {
@@ -179,13 +205,21 @@ async function replaceProjectWatch(projectId: string): Promise<void> {
   watcher.on('change', (changedPath) => enqueueChange(projectId, entry, 'change', changedPath))
   watcher.on('unlink', (changedPath) => enqueueChange(projectId, entry, 'unlink', changedPath))
   watcher.on('error', (error) => {
-    log.error('Markdown Kanban watcher error', error instanceof Error ? error : new Error(String(error)), {
-      projectId
-    })
+    log.error(
+      'Markdown Kanban watcher error',
+      error instanceof Error ? error : new Error(String(error)),
+      {
+        projectId
+      }
+    )
   })
 
   const latestProject = getDatabase().getProject(projectId)
-  if (!latestProject || latestProject.kanban_storage_mode !== 'markdown' || (interestedProjectRefCounts.get(projectId) ?? 0) === 0) {
+  if (
+    !latestProject ||
+    latestProject.kanban_storage_mode !== 'markdown' ||
+    (interestedProjectRefCounts.get(projectId) ?? 0) === 0
+  ) {
     await closeEntry(projectId, entry)
     return
   }
