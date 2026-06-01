@@ -10,6 +10,8 @@ import { unwrapEnvelope, unwrapEnvelopeApi } from '@/lib/ipc-envelope'
 const db = unwrapEnvelopeApi(() => window.db)
 const kanban = unwrapEnvelopeApi(() => window.kanban)
 
+type BoardContextTicket = { column: string; title: string }
+
 export type BoardChatStatus = 'idle' | 'starting' | 'thinking' | 'awaiting_confirmation' | 'error'
 
 export type BoardChatScope =
@@ -128,6 +130,7 @@ export function resolveBoardChatAgentSdk(
     | undefined
 ): 'opencode' | 'claude-code' | 'codex' {
   const sdk = defaultAgentSdk ?? 'opencode'
+  if (sdk === 'claude-code-cli') return 'claude-code'
   return sdk === 'terminal' ? 'opencode' : sdk
 }
 
@@ -327,7 +330,10 @@ function createBaseState(): Omit<
   | 'sendMessage'
   | 'createSelected'
   | 'toggleDraftSelected'
+  | 'markDraftsCreated'
   | 'setSelectedTargetProjectId'
+  | 'setSelectedAgentSdkOverride'
+  | 'setSelectedModelOverride'
   | 'openDrawer'
   | 'minimizeDrawer'
   | 'restoreDrawer'
@@ -448,7 +454,7 @@ async function buildBoardContext(
       `Single-project board: ${scope.projectName}`,
       `Target project ID: ${scope.projectId}`,
       'Current tickets:',
-      ...tickets.slice(0, 50).map((ticket: KanbanTicket) => `- [${ticket.column}] ${ticket.title}`)
+      ...tickets.slice(0, 50).map((ticket: BoardContextTicket) => `- [${ticket.column}] ${ticket.title}`)
     ].join('\n')
   }
 
@@ -468,7 +474,7 @@ async function buildBoardContext(
         `${project.name}:`,
         ...tickets
           .slice(0, 20)
-          .map((ticket: KanbanTicket) => `- [${ticket.column}] ${ticket.title}`)
+          .map((ticket: BoardContextTicket) => `- [${ticket.column}] ${ticket.title}`)
       ])
     ].join('\n')
   }
@@ -850,17 +856,27 @@ export const useBoardChatStore = create<BoardChatState>((set, get) => ({
         throw new Error('Fix draft validation issues before creating tickets.')
       }
 
-      const draftKeysInBatch = new Set(selectedDrafts.map((draft) => draft.draftKey))
-      const result = await kanban.ticket.createBatch({
-        drafts: selectedDrafts.map((draft) => ({
-          draft_key: draft.draftKey,
-          project_id: draft.projectId,
-          title: draft.title,
-          description: draft.description ?? null,
-          column: 'todo',
-          depends_on: draft.dependsOn.filter((key) => draftKeysInBatch.has(key))
-        }))
-      })
+      const draftsByProject = new Map<string, typeof selectedDrafts>()
+      for (const draft of selectedDrafts) {
+        draftsByProject.set(draft.projectId, [...(draftsByProject.get(draft.projectId) ?? []), draft])
+      }
+      const results = await Promise.all(
+        [...draftsByProject.entries()].map(([projectId, projectDrafts]) => {
+          const projectDraftKeys = new Set(projectDrafts.map((draft) => draft.draftKey))
+          return kanban.ticket.createBatch(projectId, {
+            drafts: projectDrafts.map((draft) => ({
+              draft_key: draft.draftKey,
+              project_id: draft.projectId,
+              title: draft.title,
+              description: draft.description ?? null,
+              column: 'todo',
+              depends_on: draft.dependsOn.filter((key) => projectDraftKeys.has(key))
+            }))
+          })
+        })
+      )
+      const createdCount = results.reduce((total, result) => total + result.tickets.length, 0)
+      const dependencyCount = results.reduce((total, result) => total + result.dependencies.length, 0)
 
       for (const projectId of new Set(selectedDrafts.map((draft) => draft.projectId))) {
         await useKanbanStore.getState().loadTickets(projectId)
@@ -869,7 +885,7 @@ export const useBoardChatStore = create<BoardChatState>((set, get) => ({
 
       get().markDraftsCreated(selectedDrafts.map((draft) => draft.id))
       get().addLocalSystemMessage(
-        `Created ${result.tickets.length} ticket${result.tickets.length === 1 ? '' : 's'} with ${result.dependencies.length} dependenc${result.dependencies.length === 1 ? 'y' : 'ies'}.`
+        `Created ${createdCount} ticket${createdCount === 1 ? '' : 's'} with ${dependencyCount} dependenc${dependencyCount === 1 ? 'y' : 'ies'}.`
       )
       set((state) => patchActiveSnapshot(state, { status: 'idle' }))
     } catch (error) {

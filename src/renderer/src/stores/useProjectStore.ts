@@ -23,6 +23,8 @@ interface Project {
   worktree_create_script: string | null
   custom_commands: CustomProjectCommand[] | null
   auto_assign_port: boolean
+  kanban_storage_mode?: 'internal' | 'markdown'
+  kanban_markdown_config?: string | null
   sort_order: number
   created_at: string
   last_accessed_at: string

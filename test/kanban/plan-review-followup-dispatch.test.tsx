@@ -270,7 +270,8 @@ describe('Plan review followup dispatch', () => {
         isLoading: false,
         isBoardViewActive: true,
         simpleModeByProject: {},
-        selectedTicketId: 'ticket-plan'
+        selectedTicketId: 'ticket-plan',
+        selectedTicketRef: { projectId: 'proj-1', ticketId: 'ticket-plan' }
       })
       useWorktreeStore.setState({
         selectedWorktreeId: null,
@@ -511,7 +512,8 @@ describe('Plan review followup dispatch', () => {
       useKanbanStore.setState({
         tickets: new Map([['proj-1', [codexPlanTicket]]]),
         isBoardViewActive: true,
-        selectedTicketId: 'ticket-codex'
+        selectedTicketId: 'ticket-codex',
+        selectedTicketRef: { projectId: 'proj-1', ticketId: 'ticket-codex' }
       })
       useSessionStore.setState({
         activeSessionId: null,
@@ -618,7 +620,8 @@ describe('Plan review followup dispatch', () => {
       useKanbanStore.setState({
         tickets: new Map([['proj-1', [codexPlanTicket]]]),
         isBoardViewActive: true,
-        selectedTicketId: 'ticket-codex'
+        selectedTicketId: 'ticket-codex',
+        selectedTicketRef: { projectId: 'proj-1', ticketId: 'ticket-codex' }
       })
       useSessionStore.setState({
         activeSessionId: null,
@@ -699,7 +702,8 @@ describe('Plan review followup dispatch', () => {
       useKanbanStore.setState({
         tickets: new Map([['proj-1', [codexPlanTicket]]]),
         isBoardViewActive: true,
-        selectedTicketId: 'ticket-codex'
+        selectedTicketId: 'ticket-codex',
+        selectedTicketRef: { projectId: 'proj-1', ticketId: 'ticket-codex' }
       })
       useSessionStore.setState({
         activeSessionId: null,
@@ -793,7 +797,8 @@ describe('Plan review followup dispatch', () => {
       useKanbanStore.setState({
         tickets: new Map([['proj-1', [codexPlanTicket]]]),
         isBoardViewActive: true,
-        selectedTicketId: 'ticket-codex'
+        selectedTicketId: 'ticket-codex',
+        selectedTicketRef: { projectId: 'proj-1', ticketId: 'ticket-codex' }
       })
       useSessionStore.setState({
         activeSessionId: null,
@@ -884,7 +889,8 @@ describe('Plan review followup dispatch', () => {
       useKanbanStore.setState({
         tickets: new Map([['proj-1', [connTicket]]]),
         isBoardViewActive: true,
-        selectedTicketId: 'ticket-conn'
+        selectedTicketId: 'ticket-conn',
+        selectedTicketRef: { projectId: 'proj-1', ticketId: 'ticket-conn' }
       })
       useSessionStore.setState({
         activeSessionId: null,
@@ -1008,7 +1014,8 @@ describe('Plan review followup dispatch', () => {
       useKanbanStore.setState({
         tickets: new Map([['proj-1', [planTicket]]]),
         isBoardViewActive: true,
-        selectedTicketId: 'ticket-plan'
+        selectedTicketId: 'ticket-plan',
+        selectedTicketRef: { projectId: 'proj-1', ticketId: 'ticket-plan' }
       })
       useSessionStore.setState({
         activeSessionId: null,

@@ -293,6 +293,7 @@ function setupStores(): {
   })
   useKanbanStore.setState({
     selectedTicketId: ticket.id,
+    selectedTicketRef: { projectId: ticket.project_id, ticketId: ticket.id },
     isBoardViewActive: true,
     tickets: new Map([['project-1', [ticket]]]),
     updateTicket: vi.fn(async () => undefined),

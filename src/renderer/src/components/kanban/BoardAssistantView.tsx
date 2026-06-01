@@ -863,7 +863,11 @@ export function BoardAssistantView({
   )
   const effectiveSelectedModel = selectedModelOverride ?? resolvedDefaultModel
   const effectiveAgentSdk =
-    selectedAgentSdkOverride ?? effectiveSelectedModel?.agentSdk ?? defaultBoardAgentSdk
+    selectedAgentSdkOverride ??
+    (effectiveSelectedModel?.agentSdk === 'claude-code-cli'
+      ? 'claude-code'
+      : effectiveSelectedModel?.agentSdk) ??
+    defaultBoardAgentSdk
   const agentSdkOptions = useMemo(() => {
     const options: Array<'opencode' | 'claude-code' | 'codex'> = []
     if (!availableAgentSdks) return [effectiveAgentSdk]
@@ -1029,7 +1033,8 @@ export function BoardAssistantView({
               project.id ===
               (scope.kind === 'project' ? targetProjectId : draft.projectId || targetProjectId)
           )?.name ?? 'Unknown project',
-        selected: true
+        selected: true,
+        createdAt: null
       })),
       latestDraftResult.messageId
     )
@@ -1202,28 +1207,40 @@ export function BoardAssistantView({
           throw new Error('Fix draft validation issues before creating tickets.')
         }
 
-        const draftKeysInBatch = new Set(draftsToCreate.map((draft) => draft.draftKey))
-        const result = await kanban.ticket.createBatch({
-          drafts: draftsToCreate.map((draft) => ({
-            draft_key: draft.draftKey,
-            project_id: draft.projectId,
-            title: draft.title,
-            description: draft.description,
-            column: 'todo',
-            depends_on: draft.dependsOn.filter((key) => draftKeysInBatch.has(key))
-          }))
-        })
+        const draftsByProject = new Map<string, typeof draftsToCreate>()
+        for (const draft of draftsToCreate) {
+          draftsByProject.set(draft.projectId, [...(draftsByProject.get(draft.projectId) ?? []), draft])
+        }
+        const results = await Promise.all(
+          [...draftsByProject.entries()].map(([projectId, projectDrafts]) => {
+            const projectDraftKeys = new Set(projectDrafts.map((draft) => draft.draftKey))
+            return kanban.ticket.createBatch(projectId, {
+              drafts: projectDrafts.map((draft) => ({
+                draft_key: draft.draftKey,
+                project_id: draft.projectId,
+                title: draft.title,
+                description: draft.description,
+                column: 'todo',
+                depends_on: draft.dependsOn.filter((key) => projectDraftKeys.has(key))
+              }))
+            })
+          })
+        )
+        const createdCount = results.reduce((total, result) => total + result.tickets.length, 0)
+        const dependencyCount = results.reduce((total, result) => total + result.dependencies.length, 0)
 
-        await useKanbanStore.getState().loadTickets(draftsToCreate[0].projectId)
-        await useKanbanStore.getState().loadDependencies(draftsToCreate[0].projectId)
+        for (const projectId of draftsByProject.keys()) {
+          await useKanbanStore.getState().loadTickets(projectId)
+          await useKanbanStore.getState().loadDependencies(projectId)
+        }
 
         markDraftsCreated(draftsToCreate.map((draft) => draft.id))
         addLocalSystemMessage(
-          `Created ${result.tickets.length} ticket${result.tickets.length === 1 ? '' : 's'} and ${result.dependencies.length} dependenc${result.dependencies.length === 1 ? 'y' : 'ies'} in ${draftsToCreate[0].projectName}.`
+          `Created ${createdCount} ticket${createdCount === 1 ? '' : 's'} and ${dependencyCount} dependenc${dependencyCount === 1 ? 'y' : 'ies'}.`
         )
         navigateToBoard()
         toast.success(
-          `Created ${result.tickets.length} ticket${result.tickets.length === 1 ? '' : 's'}.`
+          `Created ${createdCount} ticket${createdCount === 1 ? '' : 's'}.`
         )
       } catch (error) {
         const message =

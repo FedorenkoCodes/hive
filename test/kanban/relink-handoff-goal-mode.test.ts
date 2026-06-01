@@ -73,7 +73,7 @@ describe('relinkTicketsForHandoff goal mode', () => {
 
     await useKanbanStore.getState().relinkTicketsForHandoff('session-old', 'session-new', true)
 
-    expect(updateTicket).toHaveBeenCalledWith('ticket-1', {
+    expect(updateTicket).toHaveBeenCalledWith('proj-1', 'ticket-1', {
       current_session_id: 'session-new',
       plan_ready: false,
       mode: 'build',
@@ -101,7 +101,7 @@ describe('relinkTicketsForHandoff goal mode', () => {
 
     await useKanbanStore.getState().relinkTicketsForHandoff('session-old', 'session-new')
 
-    expect(updateTicket).toHaveBeenCalledWith('ticket-1', {
+    expect(updateTicket).toHaveBeenCalledWith('proj-1', 'ticket-1', {
       current_session_id: 'session-new',
       plan_ready: false,
       mode: 'build',

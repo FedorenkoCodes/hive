@@ -6,6 +6,7 @@ import { join } from 'path'
 import { existsSync, mkdirSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { MIGRATIONS } from './schema'
+import { normalizeKanbanBatchDrafts } from './kanban-batch'
 import type {
   Project,
   ProjectCreate,
@@ -37,10 +38,10 @@ import type {
   KanbanTicket,
   KanbanTicketCreate,
   KanbanTicketBatchCreate,
-  KanbanTicketBatchCreateItem,
   KanbanTicketBatchCreateResult,
   KanbanTicketUpdate,
   KanbanTicketColumn,
+  KanbanStorageMode,
   TicketMark,
   TicketFollowupMessage,
   TicketFollowupMessageCreate,
@@ -223,111 +224,6 @@ export class DatabaseService {
     }
   }
 
-  private normalizeBatchDrafts(drafts: KanbanTicketBatchCreateItem[]): Array<
-    KanbanTicketBatchCreateItem & {
-      draft_key: string
-      title: string
-      project_id: string
-      depends_on: string[]
-    }
-  > {
-    if (drafts.length === 0) {
-      throw new Error('Batch ticket creation requires at least one draft')
-    }
-
-    const normalized: Array<
-      KanbanTicketBatchCreateItem & {
-        draft_key: string
-        title: string
-        project_id: string
-        depends_on: string[]
-      }
-    > = []
-    const draftKeys = new Set<string>()
-    let projectId: string | null = null
-
-    for (const draft of drafts) {
-      const draftKey = draft.draft_key.trim()
-      const title = draft.title.trim()
-      const nextProjectId = draft.project_id.trim()
-
-      if (!draftKey) {
-        throw new Error('Each batch draft must include a draft_key')
-      }
-      if (!title) {
-        throw new Error(`Draft "${draftKey}" must include a title`)
-      }
-      if (!nextProjectId) {
-        throw new Error(`Draft "${draftKey}" must include a project_id`)
-      }
-      if (draftKeys.has(draftKey)) {
-        throw new Error(`Duplicate draft_key "${draftKey}" in batch`)
-      }
-
-      if (projectId === null) {
-        projectId = nextProjectId
-      } else if (projectId !== nextProjectId) {
-        throw new Error('All drafts in a batch must belong to the same project')
-      }
-
-      const dependsOn = Array.from(
-        new Set(
-          (draft.depends_on ?? [])
-            .filter((dependency): dependency is string => typeof dependency === 'string')
-            .map((dependency) => dependency.trim())
-            .filter(Boolean)
-        )
-      )
-
-      if (dependsOn.includes(draftKey)) {
-        throw new Error(`Draft "${draftKey}" cannot depend on itself`)
-      }
-
-      draftKeys.add(draftKey)
-      normalized.push({
-        ...draft,
-        draft_key: draftKey,
-        title,
-        project_id: nextProjectId,
-        depends_on: dependsOn
-      })
-    }
-
-    const normalizedKeySet = new Set(normalized.map((draft) => draft.draft_key))
-    for (const draft of normalized) {
-      for (const dependency of draft.depends_on) {
-        if (!normalizedKeySet.has(dependency)) {
-          throw new Error(`Draft "${draft.draft_key}" depends on unknown draft "${dependency}"`)
-        }
-      }
-    }
-
-    const visitState = new Map<string, 'visiting' | 'done'>()
-    const visit = (draftKey: string): void => {
-      const state = visitState.get(draftKey)
-      if (state === 'visiting') {
-        throw new Error(`Draft dependencies contain a cycle involving "${draftKey}"`)
-      }
-      if (state === 'done') return
-
-      visitState.set(draftKey, 'visiting')
-      const draft = normalized.find((item) => item.draft_key === draftKey)
-      if (!draft) return
-
-      for (const dependency of draft.depends_on) {
-        visit(dependency)
-      }
-
-      visitState.set(draftKey, 'done')
-    }
-
-    for (const draft of normalized) {
-      visit(draft.draft_key)
-    }
-
-    return normalized
-  }
-
   private wouldCreateTicketDependencyCycle(
     db: Database.Database,
     dependentId: string,
@@ -476,6 +372,8 @@ export class DatabaseService {
     this.safeAddColumn('projects', 'kanban_simple_mode', 'INTEGER NOT NULL DEFAULT 0')
     this.safeAddColumn('projects', 'custom_commands', 'TEXT DEFAULT NULL')
     this.safeAddColumn('projects', 'worktree_create_script', 'TEXT DEFAULT NULL')
+    this.safeAddColumn('projects', 'kanban_storage_mode', "TEXT NOT NULL DEFAULT 'internal'")
+    this.safeAddColumn('projects', 'kanban_markdown_config', 'TEXT DEFAULT NULL')
     this.safeAddColumn('kanban_tickets', 'archived_at', 'TEXT DEFAULT NULL')
     this.safeAddColumn('sessions', 'pinned_to_board', 'INTEGER NOT NULL DEFAULT 0')
     this.safeAddColumn('kanban_tickets', 'github_pr_number', 'INTEGER DEFAULT NULL')
@@ -511,6 +409,30 @@ export class DatabaseService {
         ON session_activities(session_id, created_at, id);
       CREATE INDEX IF NOT EXISTS idx_session_activities_session_turn
         ON session_activities(session_id, turn_id, created_at);
+    `)
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS markdown_kanban_card_state (
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        card_id TEXT NOT NULL,
+        current_session_id TEXT DEFAULT NULL REFERENCES sessions(id) ON DELETE SET NULL,
+        worktree_id TEXT DEFAULT NULL REFERENCES worktrees(id) ON DELETE SET NULL,
+        note TEXT DEFAULT NULL,
+        attachments TEXT NOT NULL DEFAULT '[]',
+        plan_ready INTEGER NOT NULL DEFAULT 0,
+        total_tokens INTEGER NOT NULL DEFAULT 0,
+        pending_launch_config TEXT DEFAULT NULL,
+        last_seen_path TEXT DEFAULT NULL,
+        orphaned_at TEXT DEFAULT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (project_id, card_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_markdown_kanban_card_state_session
+        ON markdown_kanban_card_state(current_session_id);
+      CREATE INDEX IF NOT EXISTS idx_markdown_kanban_card_state_worktree
+        ON markdown_kanban_card_state(worktree_id);
     `)
 
     // Kanban tickets table + indexes (idempotent repair for v11 migration)
@@ -722,6 +644,8 @@ export class DatabaseService {
       worktree_create_script: data.worktree_create_script ?? null,
       custom_commands: null,
       auto_assign_port: false,
+      kanban_storage_mode: 'internal',
+      kanban_markdown_config: null,
       sort_order: 0,
       created_at: now,
       last_accessed_at: now
@@ -865,6 +789,20 @@ export class DatabaseService {
     values.push(id)
     db.prepare(`UPDATE projects SET ${updates.join(', ')} WHERE id = ?`).run(...values)
 
+    return this.getProject(id)
+  }
+
+  updateProjectKanbanStorageMode(id: string, mode: KanbanStorageMode): Project | null {
+    const db = this.getDb()
+    if (!this.getProject(id)) return null
+    db.prepare('UPDATE projects SET kanban_storage_mode = ? WHERE id = ?').run(mode, id)
+    return this.getProject(id)
+  }
+
+  updateProjectKanbanMarkdownConfig(id: string, config: string | null): Project | null {
+    const db = this.getDb()
+    if (!this.getProject(id)) return null
+    db.prepare('UPDATE projects SET kanban_markdown_config = ? WHERE id = ?').run(config, id)
     return this.getProject(id)
   }
 
@@ -2137,7 +2075,7 @@ export class DatabaseService {
   createKanbanTicketBatch(data: KanbanTicketBatchCreate): KanbanTicketBatchCreateResult {
     return this.transaction(() => {
       const db = this.getDb()
-      const drafts = this.normalizeBatchDrafts(data.drafts)
+      const drafts = normalizeKanbanBatchDrafts(data.drafts)
       const createdTickets: KanbanTicket[] = []
       const createdByDraftKey = new Map<string, KanbanTicket>()
 
@@ -2278,6 +2216,10 @@ export class DatabaseService {
     if (data.mark !== undefined) {
       updates.push('mark = ?')
       values.push(data.mark)
+    }
+    if (data.archived_at !== undefined) {
+      updates.push('archived_at = ?')
+      values.push(data.archived_at)
     }
     if (data.pending_launch_config !== undefined) {
       updates.push('pending_launch_config = ?')

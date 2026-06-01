@@ -30,6 +30,8 @@ import {
   registerUsageHandlers,
   registerAccountHandlers,
   registerKanbanHandlers,
+  cleanupMarkdownKanbanWatchers,
+  initMarkdownKanbanWatcher,
   registerAttachmentHandlers,
   registerPetHandlers,
   registerTelegramHandlers
@@ -699,6 +701,8 @@ app
       registerFileTreeHandlers(mainWindow)
       log.info('Registering GitFile handlers')
       registerGitFileHandlers(mainWindow)
+      log.info('Initializing Markdown Kanban watcher')
+      initMarkdownKanbanWatcher(mainWindow)
       log.info('Registering Script handlers')
       registerScriptHandlers(mainWindow)
       log.info('Registering Bash handlers')
@@ -880,6 +884,8 @@ app.on('will-quit', async () => {
   await cleanupWorktreeWatchers()
   // Cleanup branch watchers (sidebar branch names)
   await cleanupBranchWatchers()
+  // Cleanup Markdown Kanban watchers
+  await cleanupMarkdownKanbanWatchers()
   // Cleanup OpenCode connections
   await cleanupOpenCode()
   telegramForwardingService.dispose()

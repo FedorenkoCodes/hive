@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   sessionStatuses: {} as Record<string, { status: string } | null>,
   kanbanState: {
     selectedTicketId: null as string | null,
+    selectedTicketRef: null as { projectId: string; ticketId: string } | null,
     tickets: new Map<string, Array<{ id: string; current_session_id: string | null }>>()
   }
 }))
@@ -90,6 +91,7 @@ describe('useClaudeCliStatusListener', () => {
     mocks.sessionStatuses = {}
     mocks.kanbanState = {
       selectedTicketId: null,
+      selectedTicketRef: null,
       tickets: new Map()
     }
 
@@ -268,6 +270,7 @@ describe('useClaudeCliStatusListener', () => {
   it('closes the selected ticket modal when a linked Claude CLI plan followup is detected', () => {
     mocks.kanbanState = {
       selectedTicketId: 'ticket-plan',
+      selectedTicketRef: { projectId: 'project-1', ticketId: 'ticket-plan' },
       tickets: new Map([
         ['project-1', [{ id: 'ticket-plan', current_session_id: 'hive-session-1' }]]
       ])
@@ -279,9 +282,57 @@ describe('useClaudeCliStatusListener', () => {
     expect(mocks.setSelectedTicketId).toHaveBeenCalledWith(null)
   })
 
+  it('does not close from bare selectedTicketId without a selectedTicketRef', () => {
+    mocks.kanbanState = {
+      selectedTicketId: 'ticket-plan',
+      selectedTicketRef: null,
+      tickets: new Map([
+        ['project-1', [{ id: 'ticket-plan', current_session_id: 'hive-session-1' }]]
+      ])
+    }
+    renderHook(() => useClaudeCliStatusListener())
+
+    planFollowupCallback?.({ sessionId: 'hive-session-1' })
+
+    expect(mocks.setSelectedTicketId).not.toHaveBeenCalled()
+  })
+
+  it('closes only the project-scoped selected ticket when duplicate markdown IDs exist', () => {
+    mocks.kanbanState = {
+      selectedTicketId: 'shared-ticket',
+      selectedTicketRef: { projectId: 'project-2', ticketId: 'shared-ticket' },
+      tickets: new Map([
+        ['project-1', [{ id: 'shared-ticket', current_session_id: 'other-session' }]],
+        ['project-2', [{ id: 'shared-ticket', current_session_id: 'hive-session-1' }]]
+      ])
+    }
+    renderHook(() => useClaudeCliStatusListener())
+
+    planFollowupCallback?.({ sessionId: 'hive-session-1' })
+
+    expect(mocks.setSelectedTicketId).toHaveBeenCalledWith(null)
+  })
+
+  it('does not close a selected-ticket-ref modal when only another project has the session', () => {
+    mocks.kanbanState = {
+      selectedTicketId: 'shared-ticket',
+      selectedTicketRef: { projectId: 'project-2', ticketId: 'shared-ticket' },
+      tickets: new Map([
+        ['project-1', [{ id: 'shared-ticket', current_session_id: 'hive-session-1' }]],
+        ['project-2', [{ id: 'shared-ticket', current_session_id: 'other-session' }]]
+      ])
+    }
+    renderHook(() => useClaudeCliStatusListener())
+
+    planFollowupCallback?.({ sessionId: 'hive-session-1' })
+
+    expect(mocks.setSelectedTicketId).not.toHaveBeenCalled()
+  })
+
   it('does not close the selected ticket modal for a different session followup', () => {
     mocks.kanbanState = {
       selectedTicketId: 'ticket-plan',
+      selectedTicketRef: null,
       tickets: new Map([
         ['project-1', [{ id: 'ticket-plan', current_session_id: 'other-session' }]]
       ])

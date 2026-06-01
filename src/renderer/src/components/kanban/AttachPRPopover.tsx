@@ -275,7 +275,7 @@ export function AttachPRPopover({ ticket, open, onOpenChange }: AttachPRPopoverP
     // Optimistic update
     useKanbanStore.getState().attachPRToTicket(ticket.id, ticket.project_id, pr.number, prUrl)
     try {
-      await kanban.ticket.attachPR(ticket.id, ticket.project_id, pr.number, prUrl)
+      await kanban.ticket.attachPR(ticket.project_id, ticket.id, pr.number, prUrl)
       toast.success(`PR #${pr.number} attached`)
     } catch {
       // Rollback
@@ -294,7 +294,7 @@ export function AttachPRPopover({ ticket, open, onOpenChange }: AttachPRPopoverP
     // Optimistic
     useKanbanStore.getState().detachPRFromTicket(ticket.id, ticket.project_id)
     try {
-      await kanban.ticket.detachPR(ticket.id, ticket.project_id)
+      await kanban.ticket.detachPR(ticket.project_id, ticket.id)
       toast.success('PR detached')
     } catch {
       // Rollback

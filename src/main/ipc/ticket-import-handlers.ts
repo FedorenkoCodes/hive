@@ -2,10 +2,10 @@ import { Data, Effect } from 'effect'
 import { z } from 'zod'
 
 import { getTicketProviderManager } from '../services/ticket-providers'
-import { getDatabase } from '../db'
 import type { TicketProviderId } from '../services/ticket-providers'
 import { createLogger } from '../services/logger'
 import { defineHandler } from './_shared/define-handler'
+import { getKanbanBackendForProject } from '../services/kanban-backend'
 
 const log = createLogger({ component: 'ticket-import-handlers' })
 
@@ -109,14 +109,17 @@ export function registerTicketImportHandlers(): void {
     'ticketImport:importIssues',
     z.tuple([providerIdSchema, z.string().min(1), z.string(), z.array(importIssueSchema)]),
     ([providerId, projectId, _repo, issues]) =>
-      Effect.try({
-        try: () => {
-          const db = getDatabase()
+      Effect.tryPromise({
+        try: async () => {
+          const backend = getKanbanBackendForProject(projectId)
           const imported: string[] = []
           const skipped: string[] = []
 
           for (const issue of issues) {
-            const existing = db.getKanbanTicketByExternalId(providerId, issue.externalId, projectId)
+            const existing = (await backend.list(projectId, true)).find(
+              (ticket) =>
+                ticket.external_provider === providerId && ticket.external_id === issue.externalId
+            )
             if (existing) {
               skipped.push(issue.externalId)
               continue
@@ -126,9 +129,9 @@ export function registerTicketImportHandlers(): void {
               issue.state === 'closed'
                 ? 'done'
                 : issue.state === 'in_progress'
-                  ? 'in_progress'
+                ? 'in_progress'
                   : 'todo'
-            db.createKanbanTicket({
+            await backend.create(projectId, {
               project_id: projectId,
               title: issue.title,
               description: issue.body,

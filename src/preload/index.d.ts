@@ -248,6 +248,7 @@ interface KanbanTicketUpdate {
   github_pr_number?: number | null
   github_pr_url?: string | null
   mark?: TicketMark | null
+  archived_at?: string | null
   pending_launch_config?: string | null
   goal_mode?: boolean
   goal_success_criteria?: string | null
@@ -278,6 +279,50 @@ interface KanbanTicketBatchCreateItem {
 interface KanbanTicketBatchCreateResult {
   tickets: KanbanTicket[]
   dependencies: Array<{ dependent_id: string; blocker_id: string; created_at: string }>
+}
+
+type KanbanStorageMode = 'internal' | 'markdown'
+
+type KanbanMarkdownConfig =
+  | {
+      layout: 'single-folder'
+      singleFolder: string
+      statusFolders?: {
+        todo: string
+        in_progress: string
+        done: string
+      }
+    }
+  | {
+      layout: 'status-folders'
+      singleFolder?: string
+      statusFolders: {
+        todo: string
+        in_progress: string
+        done: string
+      }
+    }
+
+interface KanbanStorageConfig {
+  mode: KanbanStorageMode
+  markdown: KanbanMarkdownConfig
+}
+
+type MarkdownCardDiagnosticKind = 'parse_error' | 'invalid_frontmatter' | 'duplicate_id'
+
+interface MarkdownCardDiagnostic {
+  projectId: string
+  ticketId: string | null
+  filePath: string
+  kind: MarkdownCardDiagnosticKind
+  message: string
+  blocking: true
+}
+
+interface MarkdownKanbanChangedEvent {
+  projectId: string
+  paths: string[]
+  eventTypes: Array<'add' | 'change' | 'unlink'>
 }
 
 declare global {
@@ -1856,34 +1901,35 @@ declare global {
     }
     kanban: Enveloped<{
       ticket: {
-        create: (data: KanbanTicketCreate) => Promise<KanbanTicket>
-        createBatch: (data: {
+        create: (projectId: string, data: KanbanTicketCreate) => Promise<KanbanTicket>
+        createBatch: (projectId: string, data: {
           drafts: KanbanTicketBatchCreateItem[]
         }) => Promise<KanbanTicketBatchCreateResult>
-        get: (id: string) => Promise<KanbanTicket | null>
+        get: (projectId: string, id: string) => Promise<KanbanTicket | null>
         getByProject: (projectId: string, includeArchived?: boolean) => Promise<KanbanTicket[]>
-        update: (id: string, data: KanbanTicketUpdate) => Promise<KanbanTicket | null>
-        delete: (id: string) => Promise<boolean>
-        archive: (id: string) => Promise<KanbanTicket | null>
+        update: (projectId: string, id: string, data: KanbanTicketUpdate) => Promise<KanbanTicket | null>
+        delete: (projectId: string, id: string) => Promise<boolean>
+        archive: (projectId: string, id: string) => Promise<KanbanTicket | null>
         archiveAllDone: (projectId: string) => Promise<number>
-        unarchive: (id: string) => Promise<KanbanTicket | null>
+        unarchive: (projectId: string, id: string) => Promise<KanbanTicket | null>
         move: (
+          projectId: string,
           id: string,
           column: KanbanTicketColumn,
           sortOrder: number
         ) => Promise<KanbanTicket | null>
-        reorder: (id: string, sortOrder: number) => Promise<void>
+        reorder: (projectId: string, id: string, sortOrder: number) => Promise<void>
         getBySession: (sessionId: string) => Promise<KanbanTicket[]>
-        addTokens: (id: string, tokens: number) => Promise<KanbanTicket | null>
+        addTokens: (projectId: string, id: string, tokens: number) => Promise<KanbanTicket | null>
         syncPR: (worktreeId: string, prNumber: number, prUrl: string) => Promise<void>
         clearPR: (worktreeId: string) => Promise<void>
         attachPR: (
-          ticketId: string,
           projectId: string,
+          ticketId: string,
           prNumber: number,
           prUrl: string
         ) => Promise<void>
-        detachPR: (ticketId: string, projectId: string) => Promise<void>
+        detachPR: (projectId: string, ticketId: string) => Promise<void>
         detachWorktree: (worktreeId: string) => Promise<number>
       }
       simpleMode: {
@@ -1891,16 +1937,17 @@ declare global {
       }
       dependency: {
         add: (
+          projectId: string,
           dependentId: string,
           blockerId: string
         ) => Promise<{ success: boolean; error?: string }>
-        remove: (dependentId: string, blockerId: string) => Promise<boolean>
-        getBlockers: (ticketId: string) => Promise<KanbanTicket[]>
-        getDependents: (ticketId: string) => Promise<KanbanTicket[]>
+        remove: (projectId: string, dependentId: string, blockerId: string) => Promise<boolean>
+        getBlockers: (projectId: string, ticketId: string) => Promise<KanbanTicket[]>
+        getDependents: (projectId: string, ticketId: string) => Promise<KanbanTicket[]>
         getForProject: (
           projectId: string
         ) => Promise<Array<{ dependent_id: string; blocker_id: string; created_at: string }>>
-        removeAll: (ticketId: string) => Promise<number>
+        removeAll: (projectId: string, ticketId: string) => Promise<number>
       }
       board: {
         export: (
@@ -1940,6 +1987,27 @@ declare global {
           dependencyCount: number
           ignoredDependencyCount: number
         }>
+      }
+      config: {
+        get: (projectId: string) => Promise<KanbanStorageConfig>
+        update: (projectId: string, config: KanbanMarkdownConfig) => Promise<KanbanStorageConfig>
+        setMode: (
+          projectId: string,
+          mode: KanbanStorageMode
+        ) => Promise<{ success: boolean; error?: string }>
+        createFolders: (
+          projectId: string,
+          config?: KanbanMarkdownConfig
+        ) => Promise<KanbanStorageConfig>
+        defaultMarkdown: () => Promise<KanbanMarkdownConfig>
+      }
+      diagnostics: {
+        get: (projectId: string) => Promise<MarkdownCardDiagnostic[]>
+      }
+      watch: {
+        start: (projectId: string) => Promise<{ success: boolean; error?: string }>
+        stop: (projectId: string) => Promise<{ success: boolean; error?: string }>
+        onChanged: (callback: (event: MarkdownKanbanChangedEvent) => void) => () => void
       }
     }>
     ticketImport: {

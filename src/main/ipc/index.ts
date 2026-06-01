@@ -23,6 +23,11 @@ export { registerConnectionHandlers } from './connection-handlers'
 export { registerUsageHandlers } from './usage-handlers'
 export { registerAccountHandlers } from './account-handlers'
 export { registerKanbanHandlers } from './kanban-handlers'
+export {
+  cleanupMarkdownKanbanWatchers,
+  getMarkdownKanbanWatcherCount,
+  initMarkdownKanbanWatcher
+} from '../services/markdown-kanban-watcher'
 export { registerAttachmentHandlers } from './attachment-handlers'
 export { registerPetHandlers } from './pet-handlers'
 export { registerTelegramHandlers } from './telegram-handlers'

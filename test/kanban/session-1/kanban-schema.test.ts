@@ -189,6 +189,47 @@ describeIf('Session 1: Kanban Schema', () => {
     expect(row.kanban_simple_mode).toBe(0)
   })
 
+  test('projects table has markdown Kanban storage config columns', () => {
+    const project = db.createProject({
+      name: 'Markdown Mode Test',
+      path: '/markdown-mode'
+    })
+
+    const rawDb = db['db']
+    const row = rawDb
+      .prepare('SELECT kanban_storage_mode, kanban_markdown_config FROM projects WHERE id = ?')
+      .get(project.id) as {
+      kanban_storage_mode: string
+      kanban_markdown_config: string | null
+    }
+    expect(row.kanban_storage_mode).toBe('internal')
+    expect(row.kanban_markdown_config).toBeNull()
+  })
+
+  test('markdown_kanban_card_state table has local runtime columns and indexes', () => {
+    expect(db.tableExists('markdown_kanban_card_state')).toBe(true)
+    const rawDb = db['db']
+    const columns = rawDb.pragma('table_info(markdown_kanban_card_state)') as {
+      name: string
+    }[]
+    const columnNames = columns.map((column) => column.name)
+
+    expect(columnNames).toContain('project_id')
+    expect(columnNames).toContain('card_id')
+    expect(columnNames).toContain('current_session_id')
+    expect(columnNames).toContain('worktree_id')
+    expect(columnNames).toContain('attachments')
+    expect(columnNames).toContain('plan_ready')
+    expect(columnNames).toContain('total_tokens')
+    expect(columnNames).toContain('pending_launch_config')
+    expect(columnNames).toContain('last_seen_path')
+    expect(columnNames).toContain('orphaned_at')
+
+    const indexes = db.getIndexes().map((i: { name: string }) => i.name)
+    expect(indexes).toContain('idx_markdown_kanban_card_state_session')
+    expect(indexes).toContain('idx_markdown_kanban_card_state_worktree')
+  })
+
   test('deleting a project cascades to its kanban_tickets', () => {
     const rawDb = db['db']
     const project = db.createProject({ name: 'Cascade Project', path: '/cascade-kanban' })
@@ -297,9 +338,9 @@ describeIf('Session 1: Kanban Schema', () => {
     expect(indexNames).toContain('idx_kanban_tickets_worktree')
   })
 
-  test('schema version is 11', () => {
-    expect(CURRENT_SCHEMA_VERSION).toBe(11)
-    expect(db.getSchemaVersion()).toBe(11)
+  test('schema version is current', () => {
+    expect(CURRENT_SCHEMA_VERSION).toBe(32)
+    expect(db.getSchemaVersion()).toBe(32)
   })
 })
 

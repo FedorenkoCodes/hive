@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { useSessionStore } from './useSessionStore'
 import { useConnectionStore } from './useConnectionStore'
+import { ticketKey, type TicketRef } from './useKanbanStore'
 import { lastSendMode } from '@/lib/message-send-times'
 import { notifyKanbanSessionSync } from './store-coordination'
 import { unwrapEnvelopeApi } from '@/lib/ipc-envelope'
@@ -42,7 +43,7 @@ interface WorktreeStatusState {
   mergeConflictSessionByWorktree: Record<string, string>
   // worktreeId → current conflict-fix flow phase
   mergeConflictFlowByWorktree: Record<string, MergeConflictFlow>
-  // ticketId → worktreeId whose conflicts should be surfaced on that ticket
+  // TicketKey(projectId, ticketId) → worktreeId whose conflicts should be surfaced on that ticket
   mergeConflictWorktreeByTicket: Record<string, string>
 
   // Actions
@@ -73,7 +74,7 @@ interface WorktreeStatusState {
   setMergeConflictSession: (worktreeId: string, sessionId: string) => void
   clearMergeConflictSession: (worktreeId: string) => void
   setMergeConflictFlow: (worktreeId: string, flow: MergeConflictFlow | null) => void
-  setMergeConflictWorktreeForTicket: (ticketId: string, worktreeId: string | null) => void
+  setMergeConflictWorktreeForTicket: (ticket: TicketRef, worktreeId: string | null) => void
   isWorktreeBeingReviewed: (worktreeId: string) => boolean
 }
 
@@ -406,16 +407,18 @@ export const useWorktreeStatusStore = create<WorktreeStatusState>((set, get) => 
     })
   },
 
-  setMergeConflictWorktreeForTicket: (ticketId: string, worktreeId: string | null) => {
+  setMergeConflictWorktreeForTicket: (ticket: TicketRef, worktreeId: string | null) => {
+    const key = ticketKey(ticket.projectId, ticket.ticketId)
     set((state) => {
       if (!worktreeId) {
-        const { [ticketId]: _, ...rest } = state.mergeConflictWorktreeByTicket
+        const rest = { ...state.mergeConflictWorktreeByTicket }
+        delete rest[key]
         return { mergeConflictWorktreeByTicket: rest }
       }
       return {
         mergeConflictWorktreeByTicket: {
           ...state.mergeConflictWorktreeByTicket,
-          [ticketId]: worktreeId
+          [key]: worktreeId
         }
       }
     })

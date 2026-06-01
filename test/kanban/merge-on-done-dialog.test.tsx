@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 import type { KanbanTicket, Project, Worktree } from '../../src/main/db/types'
 import { MergeOnDoneDialog } from '../../src/renderer/src/components/kanban/MergeOnDoneDialog'
 import { useGitStore } from '../../src/renderer/src/stores/useGitStore'
-import { useKanbanStore } from '../../src/renderer/src/stores/useKanbanStore'
+import { ticketKey, useKanbanStore } from '../../src/renderer/src/stores/useKanbanStore'
 import { useWorktreeStatusStore } from '../../src/renderer/src/stores/useWorktreeStatusStore'
 import { useWorktreeStore } from '../../src/renderer/src/stores/useWorktreeStore'
 
@@ -191,7 +191,7 @@ describe('MergeOnDoneDialog', () => {
     expect(useKanbanStore.getState().tickets.get('project-1')?.[0]?.column).toBe('review')
     expect(useKanbanStore.getState().pendingDoneMove).toBeNull()
     expect(useGitStore.getState().conflictsByWorktree['/repo/main']).toBe(true)
-    expect(useWorktreeStatusStore.getState().mergeConflictWorktreeByTicket['ticket-1']).toBe(
+    expect(useWorktreeStatusStore.getState().mergeConflictWorktreeByTicket[ticketKey('project-1', 'ticket-1')]).toBe(
       'base-wt'
     )
   })
@@ -229,7 +229,7 @@ describe('MergeOnDoneDialog', () => {
     fireEvent.click(keepButton)
 
     await waitFor(() => {
-      expect(ticketMove).toHaveBeenCalledWith('ticket-1', 'done', 100)
+      expect(ticketMove).toHaveBeenCalledWith('project-1', 'ticket-1', 'done', 100)
     })
     expect(useKanbanStore.getState().tickets.get('project-1')?.[0]?.column).toBe('done')
     expect(useKanbanStore.getState().pendingDoneMove).toBeNull()
@@ -253,7 +253,7 @@ describe('MergeOnDoneDialog', () => {
     fireEvent.click(await screen.findByRole('button', { name: /^archive$/i }))
 
     await waitFor(() => {
-      expect(ticketMove).toHaveBeenCalledWith('ticket-1', 'done', 100)
+      expect(ticketMove).toHaveBeenCalledWith('project-1', 'ticket-1', 'done', 100)
     })
 
     expect(useKanbanStore.getState().pendingDoneMove).toBeNull()
@@ -306,7 +306,7 @@ describe('MergeOnDoneDialog', () => {
     fireEvent.click(await screen.findByRole('button', { name: /^archive$/i }))
 
     await waitFor(() => {
-      expect(ticketMove).toHaveBeenCalledWith('ticket-1', 'done', 100)
+      expect(ticketMove).toHaveBeenCalledWith('project-1', 'ticket-1', 'done', 100)
     })
     expect(useKanbanStore.getState().pendingDoneMove).toBeNull()
 

@@ -164,6 +164,28 @@ describeIf('Session 3: Database', () => {
       expect(updated?.name).toBe('Updated')
     })
 
+    test('Generic project update does not mutate Kanban storage fields', () => {
+      const project = db.createProject({ name: 'Original', path: '/test' })
+      const updated = db.updateProject(project.id, {
+        kanban_storage_mode: 'markdown',
+        kanban_markdown_config: '{"layout":"single-folder","singleFolder":"cards"}'
+      })
+
+      expect(updated?.kanban_storage_mode).toBe('internal')
+      expect(updated?.kanban_markdown_config).toBeNull()
+    })
+
+    test('Dedicated Kanban storage update methods mutate Kanban storage fields', () => {
+      const project = db.createProject({ name: 'Original', path: '/test' })
+      const config = '{"layout":"single-folder","singleFolder":"cards"}'
+
+      db.updateProjectKanbanStorageMode(project.id, 'markdown')
+      const updated = db.updateProjectKanbanMarkdownConfig(project.id, config)
+
+      expect(updated?.kanban_storage_mode).toBe('markdown')
+      expect(updated?.kanban_markdown_config).toBe(config)
+    })
+
     test('Delete project', () => {
       const project = db.createProject({ name: 'To Delete', path: '/delete' })
       const result = db.deleteProject(project.id)

@@ -191,6 +191,9 @@ importers:
       sonner:
         specifier: ^1.7.1
         version: 1.7.4(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      yaml:
+        specifier: 2.8.2
+        version: 2.8.2
       zod:
         specifier: ^4.0.0
         version: 4.4.3
@@ -13488,8 +13491,7 @@ snapshots:
 
   yallist@5.0.0: {}
 
-  yaml@2.8.2:
-    optional: true
+  yaml@2.8.2: {}
 
   yargs-parser@21.1.1: {}
 

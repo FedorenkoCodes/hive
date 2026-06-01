@@ -7,7 +7,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { useConflictFixFlow } from '@/hooks/useConflictFixFlow'
 import { useConnectionStore } from '@/stores/useConnectionStore'
 import { useGitStore } from '@/stores/useGitStore'
-import { useKanbanStore } from '@/stores/useKanbanStore'
+import { ticketKey, useKanbanStore } from '@/stores/useKanbanStore'
 import { usePinnedStore } from '@/stores/usePinnedStore'
 import { useProjectStore } from '@/stores/useProjectStore'
 import { useQuestionStore } from '@/stores/useQuestionStore'
@@ -348,7 +348,7 @@ describe('merge conflicts ticket button', () => {
       }
     })
     useWorktreeStatusStore.setState({
-      mergeConflictWorktreeByTicket: { 'ticket-1': 'base-wt' }
+      mergeConflictWorktreeByTicket: { [ticketKey('proj-1', 'ticket-1')]: 'base-wt' }
     })
 
     renderCard()
@@ -357,6 +357,27 @@ describe('merge conflicts ticket button', () => {
 
     await waitFor(() => {
       expect(mockCreateSession).toHaveBeenCalledWith('base-wt', 'proj-1', undefined, 'build')
+    })
+  })
+
+  test('does not use another project merge-conflict worktree for the same ticket id', async () => {
+    const user = userEvent.setup()
+    useGitStore.setState({
+      conflictsByWorktree: {
+        [WORKTREE_PATH]: true,
+        '/tmp/proj-1/main': true
+      }
+    })
+    useWorktreeStatusStore.setState({
+      mergeConflictWorktreeByTicket: { [ticketKey('other-project', 'ticket-1')]: 'base-wt' }
+    })
+
+    renderCard()
+
+    await user.click(screen.getByTestId('kanban-ticket-fix-conflicts'))
+
+    await waitFor(() => {
+      expect(mockCreateSession).toHaveBeenCalledWith('wt-1', 'proj-1', undefined, 'build')
     })
   })
 
@@ -516,6 +537,7 @@ describe('merge conflicts ticket button', () => {
   test('renders a conflict banner at the top of the ticket modal', () => {
     useKanbanStore.setState({
       selectedTicketId: 'ticket-1',
+      selectedTicketRef: { projectId: 'proj-1', ticketId: 'ticket-1' },
       tickets: new Map([['proj-1', [makeTicket()]]])
     })
 
@@ -529,5 +551,21 @@ describe('merge conflicts ticket button', () => {
     expect(screen.getByTestId('ticket-modal-fix-conflicts-banner')).toHaveTextContent(
       'Fix conflicts'
     )
+  })
+
+  test('does not open the ticket modal from bare selectedTicketId', () => {
+    useKanbanStore.setState({
+      selectedTicketId: 'ticket-1',
+      selectedTicketRef: null,
+      tickets: new Map([['proj-1', [makeTicket()]]])
+    })
+
+    render(
+      <TooltipProvider>
+        <KanbanTicketModal />
+      </TooltipProvider>
+    )
+
+    expect(screen.queryByTestId('ticket-modal-fix-conflicts-banner')).not.toBeInTheDocument()
   })
 })

@@ -16,16 +16,14 @@ type ClaudeCliStatusMetadata = {
 
 function closeLinkedTicketModal(sessionId: string): void {
   const kanbanState = useKanbanStore.getState()
-  const selectedTicketId = kanbanState.selectedTicketId
-  if (!selectedTicketId) return
-
-  for (const projectTickets of kanbanState.tickets.values()) {
-    const selectedTicket = projectTickets.find((ticket) => ticket.id === selectedTicketId)
-    if (!selectedTicket) continue
-    if (selectedTicket.current_session_id === sessionId) {
+  const selectedTicketRef = kanbanState.selectedTicketRef
+  if (selectedTicketRef) {
+    const selectedTicket = kanbanState.tickets
+      .get(selectedTicketRef.projectId)
+      ?.find((ticket) => ticket.id === selectedTicketRef.ticketId)
+    if (selectedTicket?.current_session_id === sessionId) {
       kanbanState.setSelectedTicketId(null)
     }
-    return
   }
 }
 

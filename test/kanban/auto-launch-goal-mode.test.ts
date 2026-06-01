@@ -199,6 +199,7 @@ describe('autoLaunchTicket goal mode', () => {
     await autoLaunchTicket(ticket)
 
     expect(mockKanban.ticket.update).toHaveBeenCalledWith(
+      'proj-1',
       'ticket-1',
       expect.objectContaining({
         pending_launch_config: null,

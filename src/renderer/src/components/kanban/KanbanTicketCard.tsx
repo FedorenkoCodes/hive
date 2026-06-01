@@ -46,7 +46,8 @@ import { IndeterminateProgressBar } from '@/components/sessions/IndeterminatePro
 import { PulseAnimation } from '@/components/worktrees/PulseAnimation'
 import { useSessionStore } from '@/stores/useSessionStore'
 import { useWorktreeStore } from '@/stores/useWorktreeStore'
-import { setKanbanDragData, useKanbanStore } from '@/stores/useKanbanStore'
+import { parseTicketKey, setKanbanDragData, ticketKey, useKanbanStore } from '@/stores/useKanbanStore'
+import type { TicketKey } from '@/stores/useKanbanStore'
 import { useSettingsStore } from '@/stores/useSettingsStore'
 import { isBlockerSatisfied } from '@/lib/blocker-utils'
 import { useConnectionStore } from '@/stores/useConnectionStore'
@@ -94,6 +95,8 @@ interface KanbanTicketCardProps {
   connectionId?: string
   /** When viewing the pinned board (multi-project), show project tags */
   isPinnedMode?: boolean
+  /** Renderer-only identity for duplicate markdown card occurrences. */
+  cardIdentityKey?: TicketKey
 }
 
 export const KanbanTicketCard = memo(function KanbanTicketCard({
@@ -101,7 +104,8 @@ export const KanbanTicketCard = memo(function KanbanTicketCard({
   index = 0,
   isArchived = false,
   connectionId,
-  isPinnedMode
+  isPinnedMode,
+  cardIdentityKey
 }: KanbanTicketCardProps) {
   const isMultiProjectMode = !!connectionId || !!isPinnedMode
 
@@ -115,19 +119,23 @@ export const KanbanTicketCard = memo(function KanbanTicketCard({
   const hasNote = !!ticket.note && ticket.note.trim().length > 0
   const isExternalTicket = !!ticket.external_provider
   const dragCloneRef = useRef<HTMLElement | null>(null)
+  const currentTicketKey = ticketKey(ticket.project_id, ticket.id)
+  const domTicketKey = cardIdentityKey ?? currentTicketKey
 
   // ── Dependency selectors ────────────────────────────────────────
   // useShallow prevents infinite re-render loops by doing shallow equality
   // comparison on the returned array instead of Object.is reference check.
   const blockerTickets = useKanbanStore(
     useShallow((state) => {
-      const blockerIds = state.dependencyMap.get(ticket.id)
-      if (!blockerIds?.size) return EMPTY_ARRAY as unknown as KanbanTicket[]
+      const blockerKeys = state.dependencyMap.get(currentTicketKey)
+      if (!blockerKeys?.size) return EMPTY_ARRAY as unknown as KanbanTicket[]
       const result: KanbanTicket[] = []
-      for (const [, projectTickets] of state.tickets) {
-        for (const t of projectTickets) {
-          if (blockerIds.has(t.id)) result.push(t)
-        }
+      for (const blockerKey of blockerKeys) {
+        const blockerRef = parseTicketKey(blockerKey)
+        const blocker = state.tickets
+          .get(blockerRef.projectId)
+          ?.find((t) => t.id === blockerRef.ticketId)
+        if (blocker) result.push(blocker)
       }
       return result
     })
@@ -137,30 +145,41 @@ export const KanbanTicketCard = memo(function KanbanTicketCard({
 
   const unresolvedBlockerCount = useKanbanStore(
     useCallback((state) => {
-      const blockers = state.dependencyMap.get(ticket.id)
+      const blockers = state.dependencyMap.get(currentTicketKey)
       if (!blockers?.size) return 0
       let count = 0
-      for (const [, projectTickets] of state.tickets) {
-        for (const t of projectTickets) {
-          if (blockers.has(t.id) && !isBlockerSatisfied(t.column, t.mode, followUpTriggerColumn)) count++
-        }
+      for (const blockerKey of blockers) {
+        const blockerRef = parseTicketKey(blockerKey)
+        const blocker = state.tickets
+          .get(blockerRef.projectId)
+          ?.find((t) => t.id === blockerRef.ticketId)
+        if (blocker && !isBlockerSatisfied(blocker.column, blocker.mode, followUpTriggerColumn)) count++
       }
       return count
-    }, [ticket.id, followUpTriggerColumn])
+    }, [currentTicketKey, followUpTriggerColumn])
   )
 
   const isSimpleMode = useKanbanStore(
     useCallback((state) => state.simpleModeByProject[ticket.project_id] ?? false, [ticket.project_id])
   )
+  const blockingDiagnostic = useKanbanStore(
+    useCallback(
+      (state) =>
+        (state.markdownDiagnostics.get(ticket.project_id) ?? []).find(
+          (diagnostic) => diagnostic.ticketId === ticket.id && diagnostic.blocking
+        ) ?? null,
+      [ticket.project_id, ticket.id]
+    )
+  )
 
   // True when another blocked ticket is hovered and THIS ticket is one of its blockers
   const isHighlightedAsBlocker = useKanbanStore(
     useCallback((state) => {
-      const hoveredId = state.hoveredBlockedTicketId
-      if (!hoveredId) return false
-      const blockers = state.dependencyMap.get(hoveredId)
-      return blockers?.has(ticket.id) ?? false
-    }, [ticket.id])
+      const hoveredKey = state.hoveredBlockedTicketKey
+      if (!hoveredKey) return false
+      const blockers = state.dependencyMap.get(hoveredKey)
+      return blockers?.has(currentTicketKey) ?? false
+    }, [currentTicketKey])
   )
 
   const isBlocked = !isSimpleMode && unresolvedBlockerCount > 0
@@ -184,9 +203,9 @@ export const KanbanTicketCard = memo(function KanbanTicketCard({
     useCallback(
       (state) =>
         ticket.worktree_id
-          ? (state.mergeConflictWorktreeByTicket[ticket.id] ?? ticket.worktree_id)
+          ? (state.mergeConflictWorktreeByTicket[ticketKey(ticket.project_id, ticket.id)] ?? ticket.worktree_id)
           : null,
-      [ticket.id, ticket.worktree_id]
+      [ticket.id, ticket.project_id, ticket.worktree_id]
     )
   )
 
@@ -476,7 +495,12 @@ export const KanbanTicketCard = memo(function KanbanTicketCard({
   const handleDragStart = useCallback(
     (e: React.DragEvent) => {
       // Store drag data
-      setKanbanDragData({ ticketId: ticket.id, sourceColumn: ticket.column, sourceIndex: index })
+      setKanbanDragData({
+        projectId: ticket.project_id,
+        ticketId: ticket.id,
+        sourceColumn: ticket.column,
+        sourceIndex: index
+      })
       e.dataTransfer.setData('text/plain', ticket.id)
       e.dataTransfer.effectAllowed = 'move'
 
@@ -507,7 +531,7 @@ export const KanbanTicketCard = memo(function KanbanTicketCard({
 
       setIsDragging(true)
     },
-    [ticket.id, ticket.column, index]
+    [ticket.project_id, ticket.id, ticket.column, index]
   )
 
   const handleDragEnd = useCallback(() => {
@@ -537,6 +561,12 @@ export const KanbanTicketCard = memo(function KanbanTicketCard({
       // to the board's handleBoardClick which toggles the dependency
       if (useKanbanStore.getState().dependencyMode?.active) return
 
+      if (blockingDiagnostic) {
+        e.preventDefault()
+        e.stopPropagation()
+        return
+      }
+
       // Cmd+click (Mac) / Ctrl+click (Win/Linux) — select attached worktree
       if ((e.metaKey || e.ctrlKey) && ticket.worktree_id && !isArchived) {
         e.preventDefault()
@@ -548,9 +578,12 @@ export const KanbanTicketCard = memo(function KanbanTicketCard({
         return
       }
 
-      useKanbanStore.getState().setSelectedTicketId(ticket.id)
+      useKanbanStore.getState().setSelectedTicketRef({
+        projectId: ticket.project_id,
+        ticketId: ticket.id
+      })
     },
-    [ticket.id, ticket.worktree_id, ticket.project_id, isArchived, isPinnedMode, recordBoardTelegramTarget]
+    [ticket.id, ticket.worktree_id, ticket.project_id, isArchived, isPinnedMode, recordBoardTelegramTarget, blockingDiagnostic]
   )
 
   // ── Middle-click — select attached worktree (same as sidebar) ─
@@ -573,12 +606,15 @@ export const KanbanTicketCard = memo(function KanbanTicketCard({
 
   const handleMouseEnter = useCallback(() => {
     if (isBlocked) {
-      useKanbanStore.getState().setHoveredBlockedTicketId(ticket.id)
+      useKanbanStore.getState().setHoveredBlockedTicketRef({
+        projectId: ticket.project_id,
+        ticketId: ticket.id
+      })
     }
-  }, [isBlocked, ticket.id])
+  }, [isBlocked, ticket.id, ticket.project_id])
 
   const handleMouseLeave = useCallback(() => {
-    useKanbanStore.getState().setHoveredBlockedTicketId(null)
+    useKanbanStore.getState().setHoveredBlockedTicketRef(null)
   }, [])
 
   const isDone = ticket.column === 'done'
@@ -744,7 +780,9 @@ export const KanbanTicketCard = memo(function KanbanTicketCard({
               <div
                 data-testid={`kanban-ticket-${ticket.id}`}
                 data-ticket-id={ticket.id}
-                draggable={!isArchived}
+                data-project-id={ticket.project_id}
+                data-ticket-key={domTicketKey}
+                draggable={!isArchived && !blockingDiagnostic}
                 onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd}
                 onClick={handleClick}
@@ -756,7 +794,7 @@ export const KanbanTicketCard = memo(function KanbanTicketCard({
                   'hover:bg-muted/40',
                   isDragging && 'invisible',
                   isArchived && 'opacity-50 cursor-default',
-                  isBlocked && 'opacity-60',
+                  (isBlocked || blockingDiagnostic) && 'opacity-60',
                   // Highlighted as a blocker of the currently hovered ticket
                   isHighlightedAsBlocker && 'border-dashed !border-amber-500/70 ring-1 ring-amber-500/30',
                   !isHighlightedAsBlocker && borderState === 'default' && 'border-border/60',
@@ -778,6 +816,18 @@ export const KanbanTicketCard = memo(function KanbanTicketCard({
                     {tokenText}
                   </span>
                 )}
+                {blockingDiagnostic && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex text-destructive">
+                        <AlertTriangle className="h-3.5 w-3.5" />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={8}>
+                      {blockingDiagnostic.message}
+                    </TooltipContent>
+                  </Tooltip>
+                )}
                 {ticket.external_provider && (
                   <button
                     onClick={(e) => {
@@ -796,7 +846,7 @@ export const KanbanTicketCard = memo(function KanbanTicketCard({
             </div>
 
             {/* Badges + progress row */}
-            {(hasAttachments || hasNote || worktreeName || projectTag || connectionName || ticket.plan_ready || isError || rightAlignedSlot || isArchived || isBlocked || isRunProcessAlive || ticket.github_pr_number || isCreatingPR || isForwardedToTelegram || ticket.goal_mode) && (
+            {(hasAttachments || hasNote || worktreeName || projectTag || connectionName || ticket.plan_ready || isError || rightAlignedSlot || isArchived || isBlocked || blockingDiagnostic || isRunProcessAlive || ticket.github_pr_number || isCreatingPR || isForwardedToTelegram || ticket.goal_mode) && (
               <div className="mt-1.5 flex flex-wrap items-center gap-1">
                 {/* Archived badge */}
                 {isArchived && (
@@ -811,6 +861,12 @@ export const KanbanTicketCard = memo(function KanbanTicketCard({
                     className="inline-flex items-center rounded-full bg-[#229ED9]/10 border border-[#229ED9]/30 px-1.5 py-0.5 text-[#229ED9]"
                   >
                     <Send className="h-3 w-3" />
+                  </span>
+                )}
+                {blockingDiagnostic && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 border border-destructive/30 px-2 py-0.5 text-[11px] font-medium text-destructive">
+                    <AlertTriangle className="h-3 w-3" />
+                    Markdown
                   </span>
                 )}
                 {/* Blocked badge */}
@@ -1069,7 +1125,7 @@ export const KanbanTicketCard = memo(function KanbanTicketCard({
                     </span>
                   )
 
-                  return isPaused ? (
+                  return isPaused && !blockingDiagnostic ? (
                     <ContextMenu>
                       <Tooltip>
                         <ContextMenuTrigger asChild>
@@ -1107,6 +1163,48 @@ export const KanbanTicketCard = memo(function KanbanTicketCard({
           </ContextMenuTrigger>
 
           <ContextMenuContent>
+          {blockingDiagnostic ? (
+            <>
+              {isFlowTicket && !(connectionSession && !connectionName) && (
+                <ContextMenuItem
+                  data-testid="ctx-jump-to-session"
+                  onClick={handleJumpToSession}
+                  className="gap-2"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  Jump to session
+                </ContextMenuItem>
+              )}
+
+              {ticket.worktree_id && (
+                <>
+                  <ContextMenuItem
+                    data-testid="ctx-edit-context"
+                    onClick={handleEditContext}
+                    className="gap-2"
+                  >
+                    <FileText className="h-3.5 w-3.5" />
+                    Edit Context
+                  </ContextMenuItem>
+                  <ContextMenuItem
+                    data-testid="ctx-toggle-pin"
+                    onClick={handleTogglePin}
+                    className="gap-2"
+                  >
+                    {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+                    {isPinned ? 'Unpin worktree' : 'Pin worktree'}
+                  </ContextMenuItem>
+                </>
+              )}
+
+              {!isFlowTicket && !ticket.worktree_id && (
+                <ContextMenuItem disabled className="text-muted-foreground text-xs">
+                  Resolve markdown diagnostic before editing
+                </ContextMenuItem>
+              )}
+            </>
+          ) : (
+            <>
           {/* Todo tickets without worktree: pre-assign */}
           {isSimpleTicket && isTodo && !ticket.worktree_id && (
             <ContextMenuItem
@@ -1259,7 +1357,7 @@ export const KanbanTicketCard = memo(function KanbanTicketCard({
             <ContextMenuSubContent>
               <ContextMenuItem
                 data-testid="ctx-add-dependency"
-                onClick={() => useKanbanStore.getState().enterDependencyMode(ticket.id)}
+                onClick={() => useKanbanStore.getState().enterDependencyMode(ticket.id, ticket.project_id)}
                 className="gap-2"
               >
                 <Plus className="h-3.5 w-3.5" />
@@ -1268,11 +1366,14 @@ export const KanbanTicketCard = memo(function KanbanTicketCard({
               {blockerTickets.length > 0 && <ContextMenuSeparator />}
               {blockerTickets.map(blocker => (
                 <ContextMenuItem
-                  key={blocker.id}
+                  key={`${blocker.project_id}:${blocker.id}`}
                   className="gap-2 justify-between"
                   onSelect={(e) => {
                     e.preventDefault()
-                    useKanbanStore.getState().removeDependency(ticket.id, blocker.id)
+                    useKanbanStore.getState().removeDependency(
+                      { projectId: ticket.project_id, ticketId: ticket.id },
+                      { projectId: blocker.project_id, ticketId: blocker.id }
+                    )
                   }}
                 >
                   <span className="truncate max-w-[180px]">{blocker.title}</span>
@@ -1319,6 +1420,8 @@ export const KanbanTicketCard = memo(function KanbanTicketCard({
               <Trash2 className="h-3.5 w-3.5" />
               Delete
             </ContextMenuItem>
+          )}
+            </>
           )}
           </ContextMenuContent>
         </ContextMenu>

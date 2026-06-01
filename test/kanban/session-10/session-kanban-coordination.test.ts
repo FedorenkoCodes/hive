@@ -102,7 +102,7 @@ describe('Session 10: Session ↔ Kanban Store Coordination', () => {
     const tickets = useKanbanStore.getState().tickets.get('proj-1')
     const moved = tickets!.find((t) => t.id === 't1')
     expect(moved!.column).toBe('review')
-    expect(mockKanban.ticket.move).toHaveBeenCalledWith('t1', 'review', 0)
+    expect(mockKanban.ticket.move).toHaveBeenCalledWith('proj-1', 't1', 'review', 0)
   })
 
   // ────────────────────────────────────────────────────────────────────
@@ -134,8 +134,8 @@ describe('Session 10: Session ↔ Kanban Store Coordination', () => {
     const updated = tickets!.find((t) => t.id === 't1')
     expect(updated!.plan_ready).toBe(true)
     expect(updated!.column).toBe('review')
-    expect(mockKanban.ticket.update).toHaveBeenCalledWith('t1', { plan_ready: true })
-    expect(mockKanban.ticket.move).toHaveBeenCalledWith('t1', 'review', 0)
+    expect(mockKanban.ticket.update).toHaveBeenCalledWith('proj-1', 't1', { plan_ready: true })
+    expect(mockKanban.ticket.move).toHaveBeenCalledWith('proj-1', 't1', 'review', 0)
   })
 
   // ────────────────────────────────────────────────────────────────────
@@ -166,7 +166,7 @@ describe('Session 10: Session ↔ Kanban Store Coordination', () => {
     const tickets = useKanbanStore.getState().tickets.get('proj-1')
     const updated = tickets!.find((t) => t.id === 't1')
     expect(updated!.column).toBe('review')
-    expect(mockKanban.ticket.move).toHaveBeenCalledWith('t1', 'review', 0)
+    expect(mockKanban.ticket.move).toHaveBeenCalledWith('proj-1', 't1', 'review', 0)
   })
 
   // ────────────────────────────────────────────────────────────────────
@@ -196,7 +196,7 @@ describe('Session 10: Session ↔ Kanban Store Coordination', () => {
     const tickets = useKanbanStore.getState().tickets.get('proj-1')
     const moved = tickets!.find((t) => t.id === 't1')
     expect(moved!.column).toBe('review')
-    expect(mockKanban.ticket.move).toHaveBeenCalledWith('t1', 'review', 0)
+    expect(mockKanban.ticket.move).toHaveBeenCalledWith('proj-1', 't1', 'review', 0)
     expect(mockKanban.ticket.update).not.toHaveBeenCalled()
   })
 
@@ -229,7 +229,7 @@ describe('Session 10: Session ↔ Kanban Store Coordination', () => {
     const tickets = useKanbanStore.getState().tickets.get('proj-1')
     const updated = tickets!.find((t) => t.id === 't1')
     expect(updated!.current_session_id).toBe('session-new')
-    expect(mockKanban.ticket.update).toHaveBeenCalledWith('t1', {
+    expect(mockKanban.ticket.update).toHaveBeenCalledWith('proj-1', 't1', {
       current_session_id: 'session-new',
       plan_ready: false,
       mode: 'build'
@@ -294,7 +294,7 @@ describe('Session 10: Session ↔ Kanban Store Coordination', () => {
     })
 
     // The move action calls window.kanban.ticket.move which persists to DB
-    expect(mockKanban.ticket.move).toHaveBeenCalledWith('t1', 'review', 3)
+    expect(mockKanban.ticket.move).toHaveBeenCalledWith('proj-1', 't1', 'review', 3)
   })
 
   // ────────────────────────────────────────────────────────────────────
@@ -322,8 +322,8 @@ describe('Session 10: Session ↔ Kanban Store Coordination', () => {
       await new Promise((r) => setTimeout(r, 0))
     })
 
-    expect(mockKanban.ticket.update).toHaveBeenCalledWith('t1', { plan_ready: true })
-    expect(mockKanban.ticket.move).toHaveBeenCalledWith('t1', 'review', 0)
+    expect(mockKanban.ticket.update).toHaveBeenCalledWith('proj-1', 't1', { plan_ready: true })
+    expect(mockKanban.ticket.move).toHaveBeenCalledWith('proj-1', 't1', 'review', 0)
   })
 
   // ────────────────────────────────────────────────────────────────────
@@ -462,7 +462,7 @@ describe('Session 10: Session ↔ Kanban Store Coordination', () => {
     const updated = tickets!.find((t) => t.id === 't1')
     expect(updated!.plan_ready).toBe(true)
     expect(updated!.column).toBe('review')
-    expect(mockKanban.ticket.move).toHaveBeenCalledWith('t1', 'review', 0)
+    expect(mockKanban.ticket.move).toHaveBeenCalledWith('proj-1', 't1', 'review', 0)
   })
 
   test('plan_followup event clears plan_ready and moves ticket back to in_progress', async () => {
@@ -491,8 +491,8 @@ describe('Session 10: Session ↔ Kanban Store Coordination', () => {
     const updated = tickets!.find((t) => t.id === 't1')
     expect(updated!.plan_ready).toBe(false)
     expect(updated!.column).toBe('in_progress')
-    expect(mockKanban.ticket.update).toHaveBeenCalledWith('t1', { plan_ready: false })
-    expect(mockKanban.ticket.move).toHaveBeenCalledWith('t1', 'in_progress', 0)
+    expect(mockKanban.ticket.update).toHaveBeenCalledWith('proj-1', 't1', { plan_ready: false })
+    expect(mockKanban.ticket.move).toHaveBeenCalledWith('proj-1', 't1', 'in_progress', 0)
   })
 
   // ────────────────────────────────────────────────────────────────────
@@ -666,7 +666,7 @@ describe('Session 10: Session ↔ Kanban Store Coordination', () => {
     const updated = tickets!.find((t) => t.id === 't1')
     expect(updated!.mode).toBe('build')
     expect(updated!.plan_ready).toBe(false)
-    expect(mockKanban.ticket.update).toHaveBeenCalledWith('t1', {
+    expect(mockKanban.ticket.update).toHaveBeenCalledWith('proj-1', 't1', {
       mode: 'build',
       plan_ready: false
     })
@@ -702,7 +702,7 @@ describe('Session 10: Session ↔ Kanban Store Coordination', () => {
     const updated = tickets!.find((t) => t.id === 't1')
     expect(updated!.mode).toBe('plan')
     expect(updated!.plan_ready).toBe(false) // preserved from original
-    expect(mockKanban.ticket.update).toHaveBeenCalledWith('t1', {
+    expect(mockKanban.ticket.update).toHaveBeenCalledWith('proj-1', 't1', {
       mode: 'plan',
       plan_ready: false
     })

@@ -2416,7 +2416,7 @@ const analyticsOps = {
 
 const kanban = {
   ticket: {
-    create: (data: {
+    create: (projectId: string, data: {
       id?: string
       project_id: string
       title: string
@@ -2434,8 +2434,8 @@ const kanban = {
       github_pr_number?: number | null
       github_pr_url?: string | null
       mark?: 'common' | 'rare' | 'epic' | 'legendary' | null
-    }) => invokeEnvelope('kanban:ticket:create', data),
-    createBatch: (data: {
+    }) => invokeEnvelope('kanban:ticket:create', projectId, data),
+    createBatch: (projectId: string, data: {
       drafts: Array<{
         draft_key: string
         project_id: string
@@ -2456,11 +2456,12 @@ const kanban = {
         mark?: string | null
         depends_on?: string[]
       }>
-    }) => invokeEnvelope('kanban:ticket:createBatch', data),
-    get: (id: string) => invokeEnvelope('kanban:ticket:get', id),
+    }) => invokeEnvelope('kanban:ticket:createBatch', projectId, data),
+    get: (projectId: string, id: string) => invokeEnvelope('kanban:ticket:get', projectId, id),
     getByProject: (projectId: string, includeArchived?: boolean) =>
       invokeEnvelope('kanban:ticket:getByProject', projectId, includeArchived),
     update: (
+      projectId: string,
       id: string,
       data: {
         title?: string
@@ -2475,31 +2476,39 @@ const kanban = {
         github_pr_number?: number | null
         github_pr_url?: string | null
         mark?: 'common' | 'rare' | 'epic' | 'legendary' | null
+        archived_at?: string | null
         pending_launch_config?: string | null
         goal_mode?: boolean
         goal_success_criteria?: string | null
         note?: string | null
       }
-    ) => invokeEnvelope('kanban:ticket:update', id, data),
-    delete: (id: string) => invokeEnvelope('kanban:ticket:delete', id),
-    archive: (id: string) => invokeEnvelope('kanban:ticket:archive', id),
+    ) => invokeEnvelope('kanban:ticket:update', projectId, id, data),
+    delete: (projectId: string, id: string) =>
+      invokeEnvelope('kanban:ticket:delete', projectId, id),
+    archive: (projectId: string, id: string) =>
+      invokeEnvelope('kanban:ticket:archive', projectId, id),
     archiveAllDone: (projectId: string) =>
       invokeEnvelope('kanban:ticket:archiveAllDone', projectId),
-    unarchive: (id: string) => invokeEnvelope('kanban:ticket:unarchive', id),
-    move: (id: string, column: 'todo' | 'in_progress' | 'review' | 'done', sortOrder: number) =>
-      invokeEnvelope('kanban:ticket:move', id, column, sortOrder),
-    reorder: (id: string, sortOrder: number) =>
-      invokeEnvelope('kanban:ticket:reorder', id, sortOrder),
+    unarchive: (projectId: string, id: string) =>
+      invokeEnvelope('kanban:ticket:unarchive', projectId, id),
+    move: (
+      projectId: string,
+      id: string,
+      column: 'todo' | 'in_progress' | 'review' | 'done',
+      sortOrder: number
+    ) => invokeEnvelope('kanban:ticket:move', projectId, id, column, sortOrder),
+    reorder: (projectId: string, id: string, sortOrder: number) =>
+      invokeEnvelope('kanban:ticket:reorder', projectId, id, sortOrder),
     getBySession: (sessionId: string) => invokeEnvelope('kanban:ticket:getBySession', sessionId),
-    addTokens: (id: string, tokens: number) =>
-      invokeEnvelope('kanban:ticket:addTokens', id, tokens),
+    addTokens: (projectId: string, id: string, tokens: number) =>
+      invokeEnvelope('kanban:ticket:addTokens', projectId, id, tokens),
     syncPR: (worktreeId: string, prNumber: number, prUrl: string) =>
       invokeEnvelope('kanban:ticket:syncPR', worktreeId, prNumber, prUrl),
     clearPR: (worktreeId: string) => invokeEnvelope('kanban:ticket:clearPR', worktreeId),
-    attachPR: (ticketId: string, projectId: string, prNumber: number, prUrl: string) =>
-      invokeEnvelope('kanban:ticket:attachPR', ticketId, projectId, prNumber, prUrl),
-    detachPR: (ticketId: string, projectId: string) =>
-      invokeEnvelope('kanban:ticket:detachPR', ticketId, projectId),
+    attachPR: (projectId: string, ticketId: string, prNumber: number, prUrl: string) =>
+      invokeEnvelope('kanban:ticket:attachPR', projectId, ticketId, prNumber, prUrl),
+    detachPR: (projectId: string, ticketId: string) =>
+      invokeEnvelope('kanban:ticket:detachPR', projectId, ticketId),
     detachWorktree: (worktreeId: string) =>
       invokeEnvelope('kanban:ticket:detachWorktree', worktreeId)
   },
@@ -2509,23 +2518,26 @@ const kanban = {
   },
   dependency: {
     add: (
+      projectId: string,
       dependentId: string,
       blockerId: string
     ): Promise<Envelope<{ success: boolean; error?: string }>> =>
       invokeEnvelope<{ success: boolean; error?: string }>(
         'kanban:dependency:add',
+        projectId,
         dependentId,
         blockerId
       ),
-    remove: (dependentId: string, blockerId: string): Promise<Envelope<boolean>> =>
-      invokeEnvelope<boolean>('kanban:dependency:remove', dependentId, blockerId),
-    getBlockers: (ticketId: string) => invokeEnvelope('kanban:dependency:getBlockers', ticketId),
-    getDependents: (ticketId: string) =>
-      invokeEnvelope('kanban:dependency:getDependents', ticketId),
+    remove: (projectId: string, dependentId: string, blockerId: string): Promise<Envelope<boolean>> =>
+      invokeEnvelope<boolean>('kanban:dependency:remove', projectId, dependentId, blockerId),
+    getBlockers: (projectId: string, ticketId: string) =>
+      invokeEnvelope('kanban:dependency:getBlockers', projectId, ticketId),
+    getDependents: (projectId: string, ticketId: string) =>
+      invokeEnvelope('kanban:dependency:getDependents', projectId, ticketId),
     getForProject: (projectId: string) =>
       invokeEnvelope('kanban:dependency:getForProject', projectId),
-    removeAll: (ticketId: string): Promise<Envelope<number>> =>
-      invokeEnvelope<number>('kanban:dependency:removeAll', ticketId)
+    removeAll: (projectId: string, ticketId: string): Promise<Envelope<number>> =>
+      invokeEnvelope<number>('kanban:dependency:removeAll', projectId, ticketId)
   },
   board: {
     export: (
@@ -2576,6 +2588,61 @@ const kanban = {
         ignoredDependencyCount: number
       }>
     > => invokeEnvelope('kanban:board:importTickets', projectId, tickets, dependencies)
+  },
+  config: {
+    get: (projectId: string) => invokeEnvelope('kanban:config:get', projectId),
+    update: (
+      projectId: string,
+      config:
+        | {
+            layout: 'single-folder'
+            singleFolder: string
+            statusFolders?: { todo: string; in_progress: string; done: string }
+          }
+        | {
+            layout: 'status-folders'
+            singleFolder?: string
+            statusFolders: { todo: string; in_progress: string; done: string }
+          }
+    ) => invokeEnvelope('kanban:config:update', projectId, config),
+    setMode: (projectId: string, mode: 'internal' | 'markdown') =>
+      invokeEnvelope('kanban:config:setMode', projectId, mode),
+    createFolders: (
+      projectId: string,
+      config?:
+        | {
+            layout: 'single-folder'
+            singleFolder: string
+            statusFolders?: { todo: string; in_progress: string; done: string }
+          }
+        | {
+            layout: 'status-folders'
+            singleFolder?: string
+            statusFolders: { todo: string; in_progress: string; done: string }
+          }
+    ) => invokeEnvelope('kanban:config:createFolders', projectId, config),
+    defaultMarkdown: () => invokeEnvelope('kanban:config:defaultMarkdown')
+  },
+  diagnostics: {
+    get: (projectId: string) => invokeEnvelope('kanban:diagnostics:get', projectId)
+  },
+  watch: {
+    start: (projectId: string) => invokeEnvelope('kanban:watch:start', projectId),
+    stop: (projectId: string) => invokeEnvelope('kanban:watch:stop', projectId),
+    onChanged: (
+      callback: (event: { projectId: string; paths: string[]; eventTypes: Array<'add' | 'change' | 'unlink'> }) => void
+    ): (() => void) => {
+      const handler = (
+        _e: Electron.IpcRendererEvent,
+        event: { projectId: string; paths: string[]; eventTypes: Array<'add' | 'change' | 'unlink'> }
+      ): void => {
+        callback(event)
+      }
+      ipcRenderer.on('kanban:markdown:changed', handler)
+      return () => {
+        ipcRenderer.removeListener('kanban:markdown:changed', handler)
+      }
+    }
   }
 }
 

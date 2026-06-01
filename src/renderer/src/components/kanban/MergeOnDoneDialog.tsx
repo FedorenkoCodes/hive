@@ -347,7 +347,10 @@ export function MergeOnDoneDialog() {
           useGitStore.getState().setHasConflicts(resolved.baseWorktreePath, true)
           useWorktreeStatusStore
             .getState()
-            .setMergeConflictWorktreeForTicket(pendingDoneMove.ticketId, resolved.baseWorktreeId)
+            .setMergeConflictWorktreeForTicket(
+              { projectId: pendingDoneMove.projectId, ticketId: pendingDoneMove.ticketId },
+              resolved.baseWorktreeId
+            )
           void useGitStore.getState().refreshStatuses(resolved.baseWorktreePath)
           toast.error(
             `Merge conflicts in ${mergeResult.conflicts.length} file${mergeResult.conflicts.length !== 1 ? 's' : ''} — merge manually`

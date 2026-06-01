@@ -26,6 +26,7 @@ vi.mock('../../src/renderer/src/lib/toast', () => ({
 }))
 
 const projectId = 'proj-1'
+const secondProjectId = 'proj-2'
 const assistantMessageId = 'assistant-msg-1'
 
 const boardDraft: TicketDraft = {
@@ -43,7 +44,22 @@ const boardDraft: TicketDraft = {
   createdAt: null
 }
 
-function seedStores(boardMode: 'sticky-tab' | 'toggle') {
+const secondProjectDraft: TicketDraft = {
+  id: `${assistantMessageId}:draft-2:${secondProjectId}`,
+  draftKey: 'draft-2',
+  title: 'Create connection ticket',
+  description: 'Track the second project work',
+  dependsOn: ['draft-1'],
+  resolvedDependsOnTitles: ['Create persistence ticket'],
+  warnings: [],
+  validationIssues: [],
+  projectId: secondProjectId,
+  projectName: 'Project Two',
+  selected: true,
+  createdAt: null
+}
+
+function seedStores(boardMode: 'sticky-tab' | 'toggle', seededDrafts: TicketDraft[] = [boardDraft]) {
   useBoardChatStore.setState(useBoardChatStore.getInitialState())
 
   useProjectStore.setState({
@@ -61,6 +77,22 @@ function seedStores(boardMode: 'sticky-tab' | 'toggle') {
         run_script: null,
         archive_script: null,
         sort_order: 0,
+        created_at: '2026-04-15T00:00:00.000Z',
+        last_accessed_at: '2026-04-15T00:00:00.000Z'
+      },
+      {
+        id: secondProjectId,
+        name: 'Project Two',
+        path: '/tmp/proj-2',
+        description: null,
+        tags: null,
+        language: null,
+        custom_icon: null,
+        detected_icon: null,
+        setup_script: null,
+        run_script: null,
+        archive_script: null,
+        sort_order: 1,
         created_at: '2026-04-15T00:00:00.000Z',
         last_accessed_at: '2026-04-15T00:00:00.000Z'
       }
@@ -93,9 +125,51 @@ function seedStores(boardMode: 'sticky-tab' | 'toggle') {
             github_pr_url: null
           }
         ]
+      ],
+      [
+        secondProjectId,
+        [
+          {
+            id: 'wt-2',
+            project_id: secondProjectId,
+            name: 'main',
+            branch_name: 'main',
+            path: '/tmp/proj-2',
+            status: 'active',
+            is_default: true,
+            branch_renamed: 0,
+            last_message_at: null,
+            session_titles: '[]',
+            last_model_provider_id: null,
+            last_model_id: null,
+            last_model_variant: null,
+            created_at: '2026-04-15T00:00:00.000Z',
+            last_accessed_at: '2026-04-15T00:00:00.000Z',
+            github_pr_number: null,
+            github_pr_url: null
+          }
+        ]
       ]
     ])
   })
+
+  const createBatch = vi.fn(
+    (batchProjectId: string, data: { drafts: Array<{ draft_key: string; depends_on?: string[] }> }) => {
+      const localDraftKeys = new Set(data.drafts.map((draft) => draft.draft_key))
+      return Promise.resolve({
+        tickets: data.drafts.map((draft) => ({ id: `${batchProjectId}:${draft.draft_key}` })),
+        dependencies: data.drafts.flatMap((draft) =>
+          (draft.depends_on ?? [])
+            .filter((dependency) => localDraftKeys.has(dependency))
+            .map((dependency) => ({
+              dependent_id: draft.draft_key,
+              blocker_id: dependency,
+              created_at: '2026-04-15T00:00:00.000Z'
+            }))
+        )
+      })
+    }
+  )
 
   useKanbanStore.setState({
     tickets: new Map([[projectId, []]]),
@@ -122,10 +196,7 @@ function seedStores(boardMode: 'sticky-tab' | 'toggle') {
     configurable: true,
     value: {
       ticket: {
-        createBatch: vi.fn().mockResolvedValue({
-          tickets: [{ id: 'ticket-1' }],
-          dependencies: []
-        })
+        createBatch
       }
     }
   })
@@ -154,16 +225,14 @@ function seedStores(boardMode: 'sticky-tab' | 'toggle') {
         'Ready.',
         '```board-ticket-drafts',
         JSON.stringify({
-          drafts: [
-            {
-              draftKey: 'draft-1',
-              title: boardDraft.title,
-              description: boardDraft.description,
-              projectId,
-              dependsOn: [],
-              warnings: []
-            }
-          ]
+          drafts: seededDrafts.map((draft) => ({
+            draftKey: draft.draftKey,
+            title: draft.title,
+            description: draft.description,
+            projectId: draft.projectId,
+            dependsOn: draft.dependsOn,
+            warnings: draft.warnings
+          }))
         }),
         '```'
       ].join('\n'),
@@ -174,7 +243,7 @@ function seedStores(boardMode: 'sticky-tab' | 'toggle') {
   const seededSnapshot = {
     scope,
     messages,
-    drafts: [boardDraft],
+    drafts: seededDrafts,
     createdDraftIds: [],
     draftSourceMessageId: assistantMessageId,
     status: 'awaiting_confirmation' as const,
@@ -190,7 +259,7 @@ function seedStores(boardMode: 'sticky-tab' | 'toggle') {
   useBoardChatStore.setState({
     scope,
     messages,
-    drafts: [boardDraft],
+    drafts: seededDrafts,
     draftSourceMessageId: assistantMessageId,
     status: 'awaiting_confirmation',
     snapshots: {
@@ -226,5 +295,79 @@ describe('board assistant create navigation', () => {
       expect(useKanbanStore.getState().isBoardViewActive).toBe(true)
     })
     expect(useSessionStore.getState().activeBoardAssistantProjectId).toBeNull()
+  })
+
+  test('creates mixed-project drafts in project-scoped batches', async () => {
+    seedStores('sticky-tab', [boardDraft, secondProjectDraft])
+    const createBatch = window.kanban.ticket.createBatch as ReturnType<typeof vi.fn>
+    const loadTickets = useKanbanStore.getState().loadTickets as ReturnType<typeof vi.fn>
+    const loadDependencies = useKanbanStore.getState().loadDependencies as ReturnType<typeof vi.fn>
+
+    render(<BoardAssistantView projectId={projectId} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Create all' }))
+
+    await waitFor(() => {
+      expect(createBatch).toHaveBeenCalledTimes(2)
+    })
+    expect(createBatch).toHaveBeenCalledWith(projectId, {
+      drafts: [
+        {
+          draft_key: 'draft-1',
+          project_id: projectId,
+          title: boardDraft.title,
+          description: boardDraft.description,
+          column: 'todo',
+          depends_on: []
+        }
+      ]
+    })
+    expect(createBatch).toHaveBeenCalledWith(secondProjectId, {
+      drafts: [
+        {
+          draft_key: 'draft-2',
+          project_id: secondProjectId,
+          title: secondProjectDraft.title,
+          description: secondProjectDraft.description,
+          column: 'todo',
+          depends_on: []
+        }
+      ]
+    })
+    expect(loadTickets).toHaveBeenCalledWith(projectId)
+    expect(loadTickets).toHaveBeenCalledWith(secondProjectId)
+    expect(loadDependencies).toHaveBeenCalledWith(projectId)
+    expect(loadDependencies).toHaveBeenCalledWith(secondProjectId)
+    expect(useBoardChatStore.getState().messages.at(-1)?.content).toBe(
+      'Created 2 tickets and 0 dependencies.'
+    )
+  })
+
+  test('store creation filters dependencies to each project batch', async () => {
+    seedStores('sticky-tab', [boardDraft, secondProjectDraft])
+    const createBatch = window.kanban.ticket.createBatch as ReturnType<typeof vi.fn>
+
+    await useBoardChatStore.getState().createSelected()
+
+    await waitFor(() => {
+      expect(createBatch).toHaveBeenCalledTimes(2)
+    })
+    expect(createBatch).toHaveBeenCalledWith(projectId, {
+      drafts: [
+        expect.objectContaining({
+          draft_key: 'draft-1',
+          project_id: projectId,
+          depends_on: []
+        })
+      ]
+    })
+    expect(createBatch).toHaveBeenCalledWith(secondProjectId, {
+      drafts: [
+        expect.objectContaining({
+          draft_key: 'draft-2',
+          project_id: secondProjectId,
+          depends_on: []
+        })
+      ]
+    })
   })
 })

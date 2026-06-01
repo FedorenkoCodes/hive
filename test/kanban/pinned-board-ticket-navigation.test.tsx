@@ -97,6 +97,7 @@ function seedStores(): void {
   useKanbanStore.setState({
     tickets: new Map([['proj-1', [makeTicket()]]]),
     dependencyMap: new Map(),
+    markdownDiagnostics: new Map(),
     selectedTicketId: null,
     isPinnedBoardActive: true
   })
@@ -288,6 +289,142 @@ describe('pinned board ticket navigation', () => {
     expect(useWorktreeStore.getState().selectedWorktreeId).toBe('wt-1')
     expect(useProjectStore.getState().selectedProjectId).toBe('proj-1')
     expect(useWorktreeStatusStore.getState().sessionStatuses['session-1']).toBeNull()
+  })
+
+  test('renders blocking markdown diagnostics without unstable selector updates', () => {
+    useKanbanStore.setState({
+      markdownDiagnostics: new Map([
+        [
+          'proj-1',
+          [
+            {
+              projectId: 'proj-1',
+              ticketId: 'ticket-1',
+              filePath: '/tmp/proj-1/cards/ticket-1.md',
+              kind: 'invalid_frontmatter',
+              message: 'Invalid markdown card',
+              blocking: true
+            }
+          ]
+        ]
+      ])
+    })
+
+    render(
+      <TooltipProvider>
+        <KanbanTicketCard ticket={makeTicket()} isPinnedMode />
+      </TooltipProvider>
+    )
+
+    expect(screen.getByText('Markdown')).toBeInTheDocument()
+  })
+
+  test('does not open the ticket modal selection for blocking markdown diagnostics', () => {
+    useKanbanStore.setState({
+      selectedTicketRef: null,
+      selectedTicketId: null,
+      markdownDiagnostics: new Map([
+        [
+          'proj-1',
+          [
+            {
+              projectId: 'proj-1',
+              ticketId: 'ticket-1',
+              filePath: '/tmp/proj-1/cards/ticket-1.md',
+              kind: 'duplicate_id',
+              message: 'Duplicate markdown card id "ticket-1"',
+              blocking: true
+            }
+          ]
+        ]
+      ])
+    })
+
+    render(
+      <TooltipProvider>
+        <KanbanTicketCard ticket={makeTicket()} isPinnedMode />
+      </TooltipProvider>
+    )
+
+    fireEvent.click(screen.getByTestId('kanban-ticket-ticket-1'))
+
+    expect(useKanbanStore.getState().selectedTicketRef).toBeNull()
+    expect(useKanbanStore.getState().selectedTicketId).toBeNull()
+  })
+
+  test('opens ticket modal selection for normal cards', () => {
+    render(<KanbanTicketCard ticket={makeTicket()} isPinnedMode />)
+
+    fireEvent.click(screen.getByTestId('kanban-ticket-ticket-1'))
+
+    expect(useKanbanStore.getState().selectedTicketRef).toEqual({
+      projectId: 'proj-1',
+      ticketId: 'ticket-1'
+    })
+    expect(useKanbanStore.getState().selectedTicketId).toBe('ticket-1')
+  })
+
+  test('blocking markdown diagnostic cards hide mutating context menu actions', async () => {
+    useKanbanStore.setState({
+      markdownDiagnostics: new Map([
+        [
+          'proj-1',
+          [
+            {
+              projectId: 'proj-1',
+              ticketId: 'ticket-1',
+              filePath: '/tmp/proj-1/cards/ticket-1.md',
+              kind: 'duplicate_id',
+              message: 'Duplicate markdown card id "ticket-1"',
+              blocking: true
+            }
+          ]
+        ]
+      ])
+    })
+
+    render(
+      <TooltipProvider>
+        <KanbanTicketCard
+          ticket={makeTicket({
+            current_session_id: 'session-1',
+            worktree_id: 'wt-1',
+            column: 'in_progress',
+            mode: 'build',
+            note: 'local note'
+          })}
+          isPinnedMode
+        />
+      </TooltipProvider>
+    )
+
+    fireEvent.contextMenu(screen.getByTestId('kanban-ticket-ticket-1'))
+
+    expect(await screen.findByTestId('ctx-jump-to-session')).toBeInTheDocument()
+    expect(screen.getByTestId('ctx-edit-context')).toBeInTheDocument()
+    expect(screen.getByTestId('ctx-toggle-pin')).toBeInTheDocument()
+    expect(screen.queryByTestId('ctx-assign-worktree')).toBeNull()
+    expect(screen.queryByTestId('ctx-change-worktree')).toBeNull()
+    expect(screen.queryByTestId('ctx-unassign-worktree')).toBeNull()
+    expect(screen.queryByTestId('ctx-mark-submenu')).toBeNull()
+    expect(screen.queryByTestId('ctx-dependencies-submenu')).toBeNull()
+    expect(screen.queryByTestId('ctx-delete-ticket')).toBeNull()
+    expect(screen.queryByText('Edit note')).toBeNull()
+  })
+
+  test('normal cards keep the standard context menu actions', async () => {
+    render(
+      <TooltipProvider>
+        <KanbanTicketCard ticket={makeTicket({ worktree_id: null })} isPinnedMode />
+      </TooltipProvider>
+    )
+
+    fireEvent.contextMenu(screen.getByTestId('kanban-ticket-ticket-1'))
+
+    expect(await screen.findByTestId('ctx-assign-worktree')).toBeInTheDocument()
+    expect(screen.getByTestId('ctx-mark-submenu')).toBeInTheDocument()
+    expect(screen.getByTestId('ctx-dependencies-submenu')).toBeInTheDocument()
+    expect(screen.getByText('Add note')).toBeInTheDocument()
   })
 
   test('renders a goal mode badge and tooltip when the ticket is configured for goal mode', async () => {

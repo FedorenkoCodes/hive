@@ -1,12 +1,32 @@
 # Markdown Kanban Mode
 
-**Date:** 2026-06-01  
-**Status:** Design Approved  
+**Date:** 2026-06-01
+**Status:** Implemented
 **Feature:** File-backed markdown storage mode for Kanban cards
 
 ## Overview
 
 Add a second Kanban storage mode where cards are markdown files in user-configured folders. Markdown mode makes board cards readable, editable, version-controlled, and accessible to coding agents as ordinary project files. It is mutually exclusive with the existing internal SQLite-backed mode on a per-project basis.
+
+## Implementation Status
+
+The current implementation matches the core storage-mode design after the review fixes: Kanban ticket IPC is project-scoped, renderer identity uses `TicketRef`/project-scoped keys, markdown diagnostics are renderer-visible, duplicate IDs are visible but read-only, local runtime state is stored separately, mode/config writes go through Kanban-specific APIs, missing markdown folders are treated as an explicit setup state rather than a save side effect, markdown folder-layout changes migrate existing card files, markdown adoption repairs app-owned defaults, status-folder moves are write-then-remove safe, markdown create preflights card ID uniqueness, markdown writes reject blank public IDs/titles before writing files, markdown batch create uses shared SQLite-equivalent validation with rollback, Board Assistant draft dependencies are project-local in multi-project batches, board import relocates files when an existing card's column changes, internal dependency removals verify the routed project before mutating bare-ID SQLite dependency rows, and markdown boards watch configured card folders while they are visible.
+
+Current behavior notes and deviations from the original target design:
+
+- Active configured-folder filesystem watchers are implemented for visible markdown board scopes. Markdown boards reload on board open/scope change, app focus, explicit store reloads after Hive-initiated operations, and debounced watcher events from affected markdown projects.
+- Watcher events are project-scoped. Single-project boards watch one project, connection boards watch member projects, and pinned boards watch pinned projects. Internal-mode projects no-op for watcher APIs and must not scan markdown folders.
+- Watcher start/stop/restart/deactivate operations are serialized per project so fast board scope changes cannot leave an active watcher after the last visible-board interest is gone.
+- Hive-initiated markdown writes briefly suppress self-triggered watcher emissions to avoid duplicate flicker; the normal backend/store invalidation and reload paths still run.
+- `selectedTicketId` still exists as mirrored legacy close state, but non-null bare-ID selection is no longer supported for opening/resolving the modal. Modal selection requires `selectedTicketRef`.
+- Duplicate markdown cards use renderer-only occurrence identity derived from duplicate diagnostics/file path so duplicate files in the same project do not collide in React, Motion, or DOM lookup state.
+- Markdown diagnostics are mode-gated: diagnostics IPC is a no-op for internal-mode projects and uses the current markdown index when available, so diagnostics reads do not perform a second cleanup scan during a normal board load.
+- Blocking markdown diagnostic cards hide card-mutating context menu actions. Only non-card-mutating inspection/navigation actions are exposed.
+- `MarkdownCardDiagnostic.blocking` is intentionally typed as literal `true` in main/preload/renderer diagnostic contracts.
+- Plan-review handoff from a ticket modal keeps sticky-tab boards focused on `BOARD_TAB_ID`, but non-sticky/toggle mode navigates to the newly created worktree or connection session.
+- Invalid markdown files currently surface as diagnostics/placeholders. Keeping the last valid in-memory card visible while a file is temporarily invalid remains follow-up work.
+- Config save canonicalizes configured folders for existence, distinctness, and nested-folder validation, but does not create missing folders. The Project Settings UI exposes missing folders as a recoverable setup state with an explicit create-and-retry action. The current scan/write/move paths use resolved configured paths rather than carrying canonical folder paths through every filesystem operation. Full canonical path use remains follow-up work.
+- Successful Project Settings saves reload project metadata and reload the affected Kanban project so an already-visible board reflects storage-mode changes and adopted markdown cards immediately.
 
 ## Goals
 
@@ -69,7 +89,7 @@ interface KanbanBackend {
 }
 ```
 
-In markdown mode, `ticketId` is the frontmatter `id`. The markdown backend keeps an in-memory project index of `id -> file path -> parsed card`. Indexes are watched while their board is active, but they must also be loadable on demand for background workflows. The backend should expose an internal `ensureMarkdownIndex(projectId)` operation that performs a full scan when a needed project index is absent or stale.
+In markdown mode, `ticketId` is the frontmatter `id`. The markdown backend keeps an in-memory project index of `id -> file path -> parsed card`. Indexes are loadable on demand for board loads and background workflows. The backend should expose an internal `ensureMarkdownIndex(projectId)` operation that performs a full scan when a needed project index is absent or stale. Active configured-folder watching invalidates the renderer-side view by asking the normal project list/load path to reload the affected project; watchers do not perform runtime cleanup directly.
 
 Markdown mode has two persistence targets: markdown files for public, team-authored card state, and local Hive storage for private/runtime state. The canonical field mapping is defined in KanbanTicket Shape Parity, with local persistence details in Local Runtime State.
 
@@ -152,13 +172,15 @@ interface TicketRef {
 
 Required renderer identity changes:
 
-- Replace modal selection state like `selectedTicketId: string | null` with `selectedTicketRef: TicketRef | null`.
+- Replace modal selection state like `selectedTicketId: string | null` with `selectedTicketRef: TicketRef | null`. If legacy `selectedTicketId` state remains during the transition, non-null values must not open or resolve a modal by bare ID.
 - Replace dependency mode state like `sourceTicketId` with `sourceTicketRef`.
 - Key dependency maps by project-scoped identity. Either use nested maps (`Map<projectId, Map<dependentId, Set<blockerId>>>`) or a stable composite key helper.
 - In pinned and connection boards, find cards by `(project_id, id)`, not by `id` alone.
 - DOM IDs, drag payloads, animation layout IDs, dependency line keys, and test IDs that need card identity across multi-project boards should include both project ID and ticket ID.
 
 Dependencies remain project-local in v1, matching the existing database rule that dependent and blocker tickets must be in the same project. Cross-project dependency lines are out of scope.
+
+Internal-mode dependencies still persist in the existing SQLite dependency table keyed by bare ticket IDs. Project-scoped IPC routing must therefore validate the routed project before removing dependencies: `removeDependency(projectId, dependentId, blockerId)` should no-op unless the routed project owns the dependent ticket, and `removeAllDependencies(projectId, ticketId)` should no-op unless the routed project owns the ticket.
 
 ## Local Runtime State
 
@@ -261,8 +283,9 @@ For `single-folder`, Hive uses `singleFolder` and ignores `statusFolders`. For `
 
 Filesystem policy for markdown folders:
 
-- Canonicalize every configured folder with `realpath` before scanning, watching, reading, writing, or moving files.
+- Canonicalize every configured folder with `realpath` before config save/validation. Carrying canonical paths through every scan, watch, read, write, and move operation remains follow-up work.
 - Store the user-provided path in config, but use canonical paths for duplicate detection and access decisions.
+- Reject configured paths that exist but are not directories before persisting the config.
 - Reject configs where two logical folders resolve to the same canonical directory.
 - Reject configs where one configured folder is nested inside another configured folder, to avoid double indexing and duplicate watcher events.
 - Follow symlinks only for the configured folder root during canonicalization. Do not recurse into symlinked child directories.
@@ -270,8 +293,8 @@ Filesystem policy for markdown folders:
 - Accept only `.md` and `.markdown` files as card candidates.
 - Ignore hidden files, temporary editor files, and files whose basename starts with `.` or ends with common transient suffixes such as `.tmp`, `.swp`, `.bak`, or `~`.
 - Enforce a conservative file size limit for card parsing, for example 1 MB per card.
-- Enforce a per-project watcher limit equal to the configured folder count: one watcher for single-folder mode and three watchers for status-folder mode.
-- If canonicalization, permission checks, or watcher setup fails, keep the project in an explicit configuration error state rather than scanning a broader parent directory.
+- Enforce a per-project watcher limit equal to the configured folder count: one watched folder for single-folder mode and three watched folders for status-folder mode. Watchers observe only one directory level.
+- If canonicalization or permission checks fail, keep the project in an explicit configuration error state rather than scanning a broader parent directory. Watcher setup failures should follow the same error-state rule and must not create missing folders.
 
 Mode/config APIs should be explicit and project-scoped:
 
@@ -279,7 +302,14 @@ Mode/config APIs should be explicit and project-scoped:
 kanban.config.get(projectId): Promise<KanbanStorageConfig>
 kanban.config.update(projectId, config): Promise<KanbanStorageConfig>
 kanban.config.setMode(projectId, mode): Promise<{ success: boolean; error?: string }>
+kanban.config.createFolders(projectId, config?): Promise<KanbanStorageConfig>
 ```
+
+`config.update` is validation-only for filesystem existence. It must not create missing markdown folders as a side effect of pressing Save. If validation fails because configured folders do not exist, Project Settings should show a non-destructive setup state with the configured path and an explicit "Create folder and enable" action. That action calls `config.createFolders(projectId, config)` and then retries the normal config update and mode switch flow.
+
+After a successful Project Settings save, the renderer should refresh the project list/store and reload the affected Kanban project. This keeps an already-open board in sync when a clean project switches to markdown and adopts existing files, when a markdown project changes folder configuration, or when the project returns to internal mode.
+
+When a project is already in markdown mode, changing the markdown folder layout is a file migration, not just a config save. Switching from `single-folder` to `status-folders` moves parseable top-level card files from the previous `singleFolder` into the new status folder matching each card's existing `column`; `review` maps to `statusFolders.in_progress`. Switching from `status-folders` to `single-folder` moves top-level markdown card files from the previous status folders into the new flat `singleFolder`. Layout migration preserves raw file contents and frontmatter, preflights target filename collisions before moving anything, and rejects the config update without saving if a target file already exists.
 
 `setMode` must enforce the clean-board rule: switch immediately for empty boards and reject populated boards without changing persisted mode. The Project Settings UI should surface that rejection as an inline notice or dialog explaining why the mode cannot be changed.
 
@@ -395,22 +425,25 @@ Hive reloads markdown cards:
 
 - when the board opens.
 - when the app regains focus.
-- when the user triggers explicit refresh.
-- through configured folder watchers while the board is active.
+- after Hive-initiated operations that explicitly reload the Kanban store, such as imports and board-assistant draft creation.
+- while a markdown board is visible and a watched configured folder receives debounced markdown candidate add/change/unlink events.
 
-External changes from agents or teammates are reparsed and reflected in the board. New valid markdown files in configured folders appear as cards automatically.
+Configured folder watchers are active only for the currently visible board scope. A single-project board watches its project, a connection board watches the connection's projects, and a pinned board watches the pinned project set. Watcher events reload only the changed project. A dedicated manual refresh control remains out of scope.
+
+External changes from agents or teammates are reparsed and reflected after the watcher-driven reload or the next focus/open reload fallback. New valid markdown files in configured folders appear as cards after reload.
 
 Write behavior:
 
 - update only Hive-owned frontmatter fields.
 - preserve unknown frontmatter fields.
 - preserve markdown body unless editing the description.
+- reject whitespace-only public `id` and `title` values before writing markdown frontmatter. This applies to create, update title, batch create draft keys/dependencies, and board import tickets/dependencies.
 - write files atomically enough to avoid treating half-written content as final.
-- debounce or suppress watcher reactions to Hive's own writes to avoid flicker.
+- debounce watcher reactions and briefly suppress watcher reactions to Hive's own writes to avoid duplicate flicker.
 
-If a watched file has invalid frontmatter, invalid known fields, or cannot be safely written, Hive keeps the last valid in-memory card visible when available and marks it with a parse/error state. If no prior valid card exists, Hive shows an invalid-card placeholder with the file path and parse error. These states are diagnostic-only: Hive should not attempt automatic frontmatter repair until the file is parseable and writable.
+If a loaded/reloaded file has invalid frontmatter, invalid known fields, or cannot be safely written, Hive shows an invalid-card placeholder with the file path and parse error. Keeping the last valid in-memory card visible when available was part of the original target design and remains follow-up work. These states are diagnostic-only: Hive should not attempt automatic frontmatter repair until the file is parseable and writable.
 
-If a file disappears, the card disappears from markdown mode after reload or watcher update.
+If a file disappears, the card disappears from markdown mode after reload.
 
 ## Mode Switching
 
@@ -451,7 +484,12 @@ Markdown mode should preserve existing Kanban workflows where possible:
 - create dependencies.
 - create board assistant draft tickets.
 - launch or continue local sessions linked to a card ID.
+- hand off plan-review sessions from a card to a new build session.
 - attach, detach, sync, and clear public PR metadata.
+
+Plan-review handoff navigation follows the board mode. In sticky-tab mode, Hive preserves the board tab as the active session. In non-sticky/toggle mode, Hive activates the newly created worktree or connection session so the user lands in the handoff context while the background connect/prompt flow continues.
+
+Markdown batch creation should preserve internal-mode batch semantics: validate the full draft set before writing, reject duplicate draft keys, unknown dependencies, self-dependencies, cross-project payloads, dependency cycles, and unavailable card IDs, and roll back markdown files plus local runtime rows if a later batch write fails.
 
 Dependencies are stored in frontmatter by stable card ID:
 
@@ -480,15 +518,17 @@ Board import is a manual board write operation, not a mode-switching mechanism. 
 
 ## Error Handling
 
-- Missing configured folder: offer to create it. If declined, show an empty/error board state.
+- Missing configured folder: treat this as a recoverable setup state, not a destructive error. Save should not create folders automatically. Offer an explicit create action that creates the configured folders and retries enabling markdown mode; if the user does not take that action, keep the project unchanged and show the setup state.
 - Folder outside project: allow it, with a warning that cards may not be versioned with the project.
 - Invalid or missing markdown storage config: fall back to the default `docs/kanban` single-folder config only after persisting that default, or keep the board in an explicit configuration error state if persistence fails.
 - Invalid frontmatter, invalid known fields, or unwritable file: keep the last valid card visible if available; otherwise show an invalid-card placeholder. Do not mutate the file as part of automatic repair.
 - Missing `id`: auto-generate and write it back only when the frontmatter is parseable and the file is writable; otherwise treat it as a diagnostic-only invalid-card state.
+- Blank write input: reject whitespace-only ticket IDs, titles, batch draft keys/dependency IDs, and import dependency IDs before creating or rewriting markdown files.
 - Duplicate `id`: show warning markers and block all actions on affected cards until resolved.
 - File move failure during drag: revert optimistic UI and show an error.
+- Folder-layout migration collision: reject the config update before moving files, leave the previous config active, and show the target filename conflict.
 - Populated-board mode switch: keep the original mode and explain that switching modes with existing cards is not supported yet.
-- Partial write/watch race: ignore self-triggered watcher events briefly, then reload from disk.
+- Partial write/watch race: ignore self-triggered watcher events briefly, then reload from disk through normal list/load paths.
 
 ## Testing
 
@@ -509,20 +549,27 @@ Automated tests should cover:
 - local runtime-state hydration, duplicate-ID blocking, and cleanup for missing or changed card IDs.
 - markdown-mode PR attach, detach, sync, and clear semantics.
 - persistent project storage-mode and markdown-folder configuration.
+- markdown folder-layout migration in both directions, including `review` card placement and target filename collision rejection.
+- immediate project-store and affected-board reload after successful Project Settings saves.
 - mode-aware `simpleMode`, board export, board import, and import-file behavior.
 - mode switching only when internal SQLite has no active or archived tickets and the current markdown backend, when active, has no card-like files.
 - blocked mode switching when internal SQLite has archived-only tickets.
 - blocked mode switching when the current markdown backend has archived-only cards.
 - markdown target-folder adoption with default frontmatter repair.
-- watcher reload behavior for create, update, delete, and rename.
+- reload behavior for create, update, delete, rename, and watcher-driven external add/change/unlink events.
 - renderer store compatibility with both backends.
 - dependency persistence through `dependencies` with `created_at`, plus read compatibility for simple `depends_on`.
-- filesystem policy enforcement for canonical paths, duplicate/nested folders, symlink child directories, accepted extensions, file size limits, and watcher limits.
+- project-routed dependency removals in internal mode, including no-op behavior for mismatched route project IDs.
+- plan-review handoff navigation in sticky-tab and non-sticky/toggle board modes for both worktree and connection sessions.
+- filesystem policy enforcement for canonical paths, non-directory paths, duplicate/nested folders, symlink child directories, accepted extensions, file size limits, watcher folder limits, and watcher candidate filtering.
+- blank public write-input rejection for create, update title, batch create, board import tickets, and board import dependencies before markdown files are written.
+- markdown watcher lifecycle races: start followed by stop while creation is pending must close the created watcher, and concurrent starts must leave at most one active watcher.
 
 Manual verification should include:
 
 - switching an empty board between modes.
 - attempting to switch a populated or archived-only board and confirming no mode change occurs.
 - switching a clean project to markdown when target folders already contain markdown files and confirming those files are adopted with default frontmatter where needed.
-- editing a markdown card from an external editor or agent while the board is open.
+- switching an existing markdown board between one-folder and status-folder layouts and confirming card files remain visible in the board after relocation.
+- editing a markdown card from an external editor or agent while the board is visible, then confirming the board reflects the change through the watcher without requiring focus changes.
 - dragging a card in status-folder mode and confirming both frontmatter and file location update.

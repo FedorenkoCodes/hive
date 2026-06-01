@@ -47,7 +47,7 @@ import { MarkdownRenderer } from '../sessions/MarkdownRenderer'
 import { HandoffSplitButton } from '../sessions/HandoffSplitButton'
 import { IndeterminateProgressBar } from '@/components/sessions/IndeterminateProgressBar'
 import { cn } from '@/lib/utils'
-import { useKanbanStore } from '@/stores/useKanbanStore'
+import { parseTicketKey, ticketKey, useKanbanStore } from '@/stores/useKanbanStore'
 import { BOARD_TAB_ID, useSessionStore } from '@/stores/useSessionStore'
 import { useWorktreeStore } from '@/stores/useWorktreeStore'
 import { useConnectionStore } from '@/stores/useConnectionStore'
@@ -439,19 +439,19 @@ function TicketGoalSection({
 
 // ── Component ───────────────────────────────────────────────────────
 export function KanbanTicketModal() {
-  const selectedTicketId = useKanbanStore((s) => s.selectedTicketId)
+  const selectedTicketRef = useKanbanStore((s) => s.selectedTicketRef)
   const setSelectedTicketId = useKanbanStore((s) => s.setSelectedTicketId)
   const tickets = useKanbanStore((s) => s.tickets)
 
-  // Find the ticket across all projects
+  // Ticket IDs are project-local in markdown mode, so modal selection must be project-scoped.
   const ticket = useMemo<KanbanTicket | null>(() => {
-    if (!selectedTicketId) return null
-    for (const projectTickets of tickets.values()) {
-      const found = projectTickets.find((t) => t.id === selectedTicketId)
-      if (found) return found
-    }
-    return null
-  }, [selectedTicketId, tickets])
+    if (!selectedTicketRef) return null
+    return (
+      tickets
+        .get(selectedTicketRef.projectId)
+        ?.find((t) => t.id === selectedTicketRef.ticketId) ?? null
+    )
+  }, [selectedTicketRef, tickets])
 
   if (!ticket) return null
 
@@ -463,9 +463,9 @@ function MergeConflictBanner({ ticket }: { ticket: KanbanTicket }) {
     useCallback(
       (state) =>
         ticket.worktree_id
-          ? (state.mergeConflictWorktreeByTicket[ticket.id] ?? ticket.worktree_id)
+          ? (state.mergeConflictWorktreeByTicket[ticketKey(ticket.project_id, ticket.id)] ?? ticket.worktree_id)
           : null,
-      [ticket.id, ticket.worktree_id]
+      [ticket.id, ticket.project_id, ticket.worktree_id]
     )
   )
   const worktreePath = useWorktreeStore(
@@ -1261,13 +1261,15 @@ function EditModeContent({
   // comparison on the returned array instead of Object.is reference check.
   const blockerTickets = useKanbanStore(
     useShallow((state) => {
-      const blockerIds = state.dependencyMap.get(ticket.id)
-      if (!blockerIds?.size) return [] as KanbanTicket[]
+      const blockerKeys = state.dependencyMap.get(ticketKey(ticket.project_id, ticket.id))
+      if (!blockerKeys?.size) return [] as KanbanTicket[]
       const result: KanbanTicket[] = []
-      for (const [, projectTickets] of state.tickets) {
-        for (const t of projectTickets) {
-          if (blockerIds.has(t.id)) result.push(t)
-        }
+      for (const blockerKey of blockerKeys) {
+        const blockerRef = parseTicketKey(blockerKey)
+        const blocker = state.tickets
+          .get(blockerRef.projectId)
+          ?.find((t) => t.id === blockerRef.ticketId)
+        if (blocker) result.push(blocker)
       }
       return result
     })
@@ -1275,14 +1277,15 @@ function EditModeContent({
 
   const dependentTickets = useKanbanStore(
     useShallow((state) => {
+      const currentTicketKey = ticketKey(ticket.project_id, ticket.id)
       const result: KanbanTicket[] = []
-      for (const [depId, blockerIds] of state.dependencyMap) {
-        if (blockerIds.has(ticket.id)) {
-          for (const [, projectTickets] of state.tickets) {
-            const t = projectTickets.find((pt) => pt.id === depId)
-            if (t) result.push(t)
-          }
-        }
+      for (const [depKey, blockerKeys] of state.dependencyMap) {
+        if (!blockerKeys.has(currentTicketKey)) continue
+        const depRef = parseTicketKey(depKey)
+        const dependent = state.tickets
+          .get(depRef.projectId)
+          ?.find((t) => t.id === depRef.ticketId)
+        if (dependent) result.push(dependent)
       }
       return result
     })
@@ -1464,7 +1467,7 @@ function EditModeContent({
                 <span className="text-xs text-muted-foreground">Blocked by:</span>
                 {blockerTickets.map((blocker) => (
                   <div
-                    key={blocker.id}
+                    key={`${blocker.project_id}:${blocker.id}`}
                     className="flex items-center justify-between gap-2 px-2 py-1 rounded-md bg-muted/30"
                   >
                     <div className="flex items-center gap-2 min-w-0">
@@ -1477,7 +1480,10 @@ function EditModeContent({
                     </div>
                     <button
                       onClick={() =>
-                        useKanbanStore.getState().removeDependency(ticket.id, blocker.id)
+                        useKanbanStore.getState().removeDependency(
+                          { projectId: ticket.project_id, ticketId: ticket.id },
+                          { projectId: blocker.project_id, ticketId: blocker.id }
+                        )
                       }
                       className="text-muted-foreground hover:text-foreground shrink-0"
                     >
@@ -1494,7 +1500,7 @@ function EditModeContent({
                 <span className="text-xs text-muted-foreground">Depended on by:</span>
                 {dependentTickets.map((dep) => (
                   <div
-                    key={dep.id}
+                    key={`${dep.project_id}:${dep.id}`}
                     className="flex items-center gap-2 px-2 py-1 rounded-md bg-muted/30"
                   >
                     <span className="text-sm truncate">{dep.title}</span>
@@ -1507,7 +1513,7 @@ function EditModeContent({
             <button
               type="button"
               onClick={() => {
-                useKanbanStore.getState().enterDependencyMode(ticket.id)
+                useKanbanStore.getState().enterDependencyMode(ticket.id, ticket.project_id)
                 onClose() // Close modal
               }}
               className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -2057,11 +2063,13 @@ function PlanReviewModeContent({
             sessionStore.setPendingMessage(newSessionId, handoffPrompt)
           }
 
-          // Handoff from the ticket modal starts work in the background and keeps
-          // the board in focus. Sticky-tab mode represents the board as a tab, so
-          // explicitly preserve that tab; toggle mode is already on the board.
+          // Sticky-tab mode keeps the board tab active; toggle mode navigates to
+          // the newly created handoff session.
           if (useSettingsStore.getState().boardMode === 'sticky-tab') {
             sessionStore.setActiveSession(BOARD_TAB_ID)
+          } else {
+            sessionStore.setActiveConnection(sessionRecord.connection_id)
+            sessionStore.setActiveConnectionSession(newSessionId)
           }
 
           onClose()
@@ -2144,11 +2152,13 @@ function PlanReviewModeContent({
           sessionStore.setPendingMessage(newSessionId, handoffPrompt)
         }
 
-        // Handoff from the ticket modal starts work in the background and keeps
-        // the board in focus. Sticky-tab mode represents the board as a tab, so
-        // explicitly preserve that tab; toggle mode is already on the board.
+        // Sticky-tab mode keeps the board tab active; toggle mode navigates to
+        // the newly created handoff session.
         if (useSettingsStore.getState().boardMode === 'sticky-tab') {
           sessionStore.setActiveSession(BOARD_TAB_ID)
+        } else {
+          sessionStore.setActiveWorktree(worktreeId)
+          sessionStore.setActiveSession(newSessionId)
         }
 
         onClose()
