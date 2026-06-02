@@ -702,6 +702,7 @@ class MarkdownKanbanBackend implements KanbanBackend {
 
   async delete(projectId: string, ticketId: string): Promise<boolean> {
     const card = await this.requireMutableCard(projectId, ticketId)
+    await this.removeAllDependencies(projectId, ticketId)
     await unlink(card.filePath)
     this.deleteRuntime(projectId, ticketId)
     this.invalidate(projectId)

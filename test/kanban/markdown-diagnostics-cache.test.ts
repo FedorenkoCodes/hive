@@ -1003,6 +1003,51 @@ describe('markdown diagnostics cache', () => {
     expect(typeof doneB.archived_at).toBe('string')
   })
 
+  test('delete removes markdown dependency references before unlinking the card', async () => {
+    const backend = (
+      await import('../../src/main/services/kanban-backend')
+    ).getMarkdownKanbanBackend()
+    const cardsPath = join(tempRoot!, 'cards')
+    const dependentPath = join(cardsPath, 'a.md')
+    const blockerPath = join(cardsPath, 'b.md')
+    await writeFile(
+      dependentPath,
+      [
+        '---',
+        'id: a',
+        'title: A',
+        'created_at: "2026-06-01T00:00:00.000Z"',
+        'dependencies:',
+        '  - blocker_id: b',
+        '    created_at: "2026-06-01T00:00:00.000Z"',
+        '---',
+        'A body'
+      ].join('\n'),
+      'utf-8'
+    )
+    await writeFile(
+      blockerPath,
+      [
+        '---',
+        'id: b',
+        'title: B',
+        'created_at: "2026-06-01T00:00:00.000Z"',
+        '---',
+        'B body'
+      ].join('\n'),
+      'utf-8'
+    )
+    mockState.runtimeRows = [{ card_id: 'b', orphaned_at: null }]
+    backend.invalidate('proj-cache')
+
+    await expect(backend.delete('proj-cache', 'b')).resolves.toBe(true)
+
+    await expect(access(blockerPath)).rejects.toThrow()
+    const dependent = frontmatterOf(await readFile(dependentPath, 'utf-8'))
+    expect(dependencyBlockersOf(dependent)).toEqual([])
+    expect(mockState.runtimeRows.some((row) => row.card_id === 'b')).toBe(false)
+  })
+
   test('import aborts before creating files when selected markdown id is duplicated', async () => {
     const backend = (
       await import('../../src/main/services/kanban-backend')
