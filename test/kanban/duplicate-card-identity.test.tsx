@@ -127,6 +127,14 @@ describe('duplicate markdown card renderer identity', () => {
   beforeEach(() => {
     moveTicket.mockReset()
     reorderTicket.mockReset()
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe(): void {}
+        unobserve(): void {}
+        disconnect(): void {}
+      }
+    )
     useKanbanStore.setState({
       tickets: new Map(),
       markdownDiagnostics: new Map([
@@ -253,6 +261,59 @@ describe('duplicate markdown card renderer identity', () => {
 
     await waitFor(() => expect(moveTicket).toHaveBeenCalled())
     expect(moveTicket).toHaveBeenCalledWith('shared', 'proj-1', 'done', 11)
+  })
+
+  test('aggregate simple mode moves directly when dropping into In Progress', async () => {
+    const tickets = [
+      makeTicket({ id: 'shared', project_id: 'proj-1', title: 'Project 1 Shared', sort_order: 10 }),
+      makeTicket({ id: 'other', project_id: 'proj-2', title: 'Project 2 Other', sort_order: 100 })
+    ]
+    useKanbanStore.setState({
+      tickets: new Map([
+        ['proj-1', [tickets[0]]],
+        ['proj-2', [tickets[1]]]
+      ]),
+      simpleModeByProject: { '': true }
+    })
+    const { container } = render(
+      <TooltipProvider>
+        <KanbanColumn column="in_progress" projectId="" tickets={tickets} isPinnedMode />
+      </TooltipProvider>
+    )
+    setKanbanDragData({
+      projectId: 'proj-1',
+      ticketId: 'shared',
+      sourceColumn: 'todo',
+      sourceIndex: 0
+    })
+
+    fireEvent.drop(container.querySelector('[data-testid="kanban-drop-area-in_progress"]')!)
+
+    await waitFor(() => expect(moveTicket).toHaveBeenCalled())
+    expect(moveTicket).toHaveBeenCalledWith('shared', 'proj-1', 'in_progress', 11)
+  })
+
+  test('aggregate flow mode opens picker instead of moving directly when dropping into In Progress', async () => {
+    const ticket = makeTicket({ id: 'shared', project_id: 'proj-1', title: 'Project 1 Shared', sort_order: 10 })
+    useKanbanStore.setState({
+      tickets: new Map([['proj-1', [ticket]]]),
+      simpleModeByProject: { '': false }
+    })
+    const { container } = render(
+      <TooltipProvider>
+        <KanbanColumn column="in_progress" projectId="" tickets={[ticket]} isPinnedMode />
+      </TooltipProvider>
+    )
+    setKanbanDragData({
+      projectId: 'proj-1',
+      ticketId: 'shared',
+      sourceColumn: 'todo',
+      sourceIndex: 0
+    })
+
+    fireEvent.drop(container.querySelector('[data-testid="kanban-drop-area-in_progress"]')!)
+
+    await waitFor(() => expect(moveTicket).not.toHaveBeenCalled())
   })
 
   test('same-column reorder filters the dragged project key before computing sort order', async () => {

@@ -395,7 +395,11 @@ export function KanbanColumn({
       if (sourceColumn !== column) {
         // ── Cross-column move ─────────────────────────────────
         const ticketProjectId = findTicketProjectId(ticketId, draggedProjectId)
-        const isSimpleMode = store.simpleModeByProject[ticketProjectId ?? draggedProjectId] ?? false
+        const simpleModeKey = isMultiProjectMode ? projectId : ticketProjectId
+        const isSimpleMode =
+          store.simpleModeByProject[simpleModeKey] ??
+          store.simpleModeByProject[ticketProjectId] ??
+          false
 
         // S9: when dropping on In Progress and simple mode is off,
         //   open the worktree picker modal instead of moving directly.
@@ -540,6 +544,8 @@ export function KanbanColumn({
       tickets.length,
       isInProgressColumn,
       isTodoColumn,
+      isMultiProjectMode,
+      projectId,
       findTicketProjectId,
       findTicket,
       projectTicketsForColumn,
