@@ -252,6 +252,7 @@ class InternalKanbanBackend implements KanbanBackend {
   async delete(projectId: string, ticketId: string): Promise<boolean> {
     const existing = await this.get(projectId, ticketId)
     if (!existing) return false
+    getDatabase().removeAllDependenciesForTicket(ticketId)
     return getDatabase().deleteKanbanTicket(ticketId)
   }
 

@@ -28,6 +28,10 @@ const { mockDatabase, mockState } = vi.hoisted(() => {
         (dep) => dep.dependent_id !== ticketId && dep.blocker_id !== ticketId
       )
       return before - mockState.dependencies.length
+    }),
+    deleteKanbanTicket: vi.fn((ticketId: string) => {
+      const existed = mockState.tickets.delete(ticketId)
+      return existed
     })
   }
 
@@ -123,5 +127,31 @@ describe('internal kanban dependency routing', () => {
     expect(removed).toBe(1)
     expect(mockDatabase.removeAllDependenciesForTicket).toHaveBeenCalledWith('dependent-a')
     expect(mockState.dependencies).toHaveLength(0)
+  })
+
+  test('delete removes dependencies before deleting a ticket owned by the route project', async () => {
+    const { getKanbanBackendForProject } = await import('../../src/main/services/kanban-backend')
+    const backend = getKanbanBackendForProject('project-a')
+
+    const deleted = await backend.delete('project-a', 'dependent-a')
+
+    expect(deleted).toBe(true)
+    expect(mockDatabase.removeAllDependenciesForTicket).toHaveBeenCalledWith('dependent-a')
+    expect(mockDatabase.deleteKanbanTicket).toHaveBeenCalledWith('dependent-a')
+    expect(mockState.dependencies).toHaveLength(0)
+    expect(mockState.tickets.has('dependent-a')).toBe(false)
+  })
+
+  test('delete no-ops when the route project does not own the ticket', async () => {
+    const { getKanbanBackendForProject } = await import('../../src/main/services/kanban-backend')
+    const backend = getKanbanBackendForProject('project-b')
+
+    const deleted = await backend.delete('project-b', 'dependent-a')
+
+    expect(deleted).toBe(false)
+    expect(mockDatabase.removeAllDependenciesForTicket).not.toHaveBeenCalled()
+    expect(mockDatabase.deleteKanbanTicket).not.toHaveBeenCalled()
+    expect(mockState.dependencies).toHaveLength(1)
+    expect(mockState.tickets.has('dependent-a')).toBe(true)
   })
 })
