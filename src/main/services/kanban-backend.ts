@@ -716,15 +716,32 @@ class MarkdownKanbanBackend implements KanbanBackend {
   }
 
   async archiveAllDone(projectId: string): Promise<number> {
-    const tickets = await this.list(projectId, false)
-    let count = 0
-    for (const ticket of tickets) {
-      if (ticket.column === 'done' && !ticket.archived_at) {
-        await this.archive(projectId, ticket.id)
-        count++
-      }
+    const index = await this.reloadIndex(projectId)
+    const archivedIds = new Set(
+      index.tickets
+        .filter((ticket) => ticket.column === 'done' && !ticket.archived_at)
+        .map((ticket) => ticket.id)
+    )
+    if (archivedIds.size === 0) return 0
+
+    const archivedAt = new Date().toISOString()
+    for (const ticket of index.tickets) {
+      const card = index.cardsById.get(ticket.id)
+      if (!card) continue
+      const deps = readDependencies(card.frontmatter, ticket.created_at)
+      const archiveCard = archivedIds.has(ticket.id)
+      const next = archiveCard ? [] : deps.filter((dep) => !archivedIds.has(dep.blocker_id))
+      if (!archiveCard && next.length === deps.length) continue
+      await rewriteCard(card.filePath, {
+        ...(archiveCard ? { archived_at: archivedAt } : {}),
+        dependencies: next.map((dep) => ({
+          blocker_id: dep.blocker_id,
+          created_at: dep.created_at
+        }))
+      })
     }
-    return count
+    this.invalidate(projectId)
+    return archivedIds.size
   }
 
   async unarchive(projectId: string, ticketId: string): Promise<KanbanTicket | null> {
@@ -909,6 +926,35 @@ class MarkdownKanbanBackend implements KanbanBackend {
     })
   }
 
+  private async removeSelectedDependencies(
+    projectId: string,
+    selectedIds: Set<string>
+  ): Promise<number> {
+    const index = await this.reloadIndex(projectId)
+    let removed = 0
+    for (const ticketId of selectedIds) {
+      const card = index.cardsById.get(ticketId)
+      if (!card) continue
+      const deps = readDependencies(card.frontmatter, card.ticket.created_at)
+      const next = deps.filter((dep) => !selectedIds.has(dep.blocker_id))
+      if (next.length === deps.length) continue
+      removed += deps.length - next.length
+      await rewriteCard(
+        card.filePath,
+        {
+          dependencies: next.map((dep) => ({
+            blocker_id: dep.blocker_id,
+            created_at: dep.created_at
+          }))
+        },
+        undefined,
+        ['depends_on']
+      )
+    }
+    this.invalidate(projectId)
+    return removed
+  }
+
   async removeAllDependencies(projectId: string, ticketId: string): Promise<number> {
     const index = await this.reloadIndex(projectId)
     let removed = 0
@@ -1002,7 +1048,7 @@ class MarkdownKanbanBackend implements KanbanBackend {
       }
     }
 
-    for (const ticketId of selectedIds) await this.removeAllDependencies(projectId, ticketId)
+    await this.removeSelectedDependencies(projectId, selectedIds)
 
     for (const dependency of dependencies ?? []) {
       const dependentId = dependency.dependentId.trim()
@@ -1971,20 +2017,6 @@ function wouldCreateDependencyCycle(
   }
 
   return visit(blockerId, new Set())
-}
-
-function isMarkdownCandidate(name: string): boolean {
-  if (name.startsWith('.')) return false
-  if (
-    name.endsWith('~') ||
-    name.endsWith('.tmp') ||
-    name.endsWith('.swp') ||
-    name.endsWith('.bak')
-  ) {
-    return false
-  }
-  const ext = extname(name).toLowerCase()
-  return ext === '.md' || ext === '.markdown'
 }
 
 function generateTicketId(seed: string): string {

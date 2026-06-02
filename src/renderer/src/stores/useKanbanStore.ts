@@ -193,7 +193,7 @@ interface KanbanState {
   boardTelegramTarget: BoardTelegramTarget | null
 
   // ── Actions ────────────────────────────────────────────────────────
-  setSelectedTicketId: (id: string | null) => void
+  setSelectedTicketId: (id: null) => void
   setSelectedTicketRef: (ref: TicketRef | null) => void
   setBoardTelegramTarget: (target: BoardTelegramTarget | null) => void
   clearBoardTelegramTarget: () => void
@@ -298,7 +298,7 @@ export const useKanbanStore = create<KanbanState>()(
       hoveredBlockedTicketKey: null,
 
       // ── setSelectedTicketId ────────────────────────────────────────
-      setSelectedTicketId: (_id: string | null) => {
+      setSelectedTicketId: (_id: null) => {
         set({ selectedTicketId: null, selectedTicketRef: null })
       },
 

@@ -1,7 +1,18 @@
-import { access, chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import {
+  access,
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import YAML from 'yaml'
 
 interface MockProject {
   id: string
@@ -76,6 +87,24 @@ async function markdownFiles(folder: string): Promise<string[]> {
   return (await readdir(folder)).filter((file) => file.endsWith('.md')).sort()
 }
 
+function frontmatterOf(raw: string): Record<string, unknown> {
+  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+  if (!match) return {}
+  return (YAML.parse(match[1]) ?? {}) as Record<string, unknown>
+}
+
+function dependencyBlockersOf(frontmatter: Record<string, unknown>): string[] {
+  const dependencies = frontmatter.dependencies
+  if (!Array.isArray(dependencies)) return []
+  return dependencies
+    .map((dependency) =>
+      dependency && typeof dependency === 'object'
+        ? (dependency as Record<string, unknown>).blocker_id
+        : null
+    )
+    .filter((blocker): blocker is string => typeof blocker === 'string')
+}
+
 describe('markdown diagnostics cache', () => {
   let tempRoot: string | null = null
 
@@ -104,7 +133,9 @@ describe('markdown diagnostics cache', () => {
   })
 
   test('diagnostics are a no-op for internal projects and do not repair markdown files', async () => {
-    const backend = (await import('../../src/main/services/kanban-backend')).getMarkdownKanbanBackend()
+    const backend = (
+      await import('../../src/main/services/kanban-backend')
+    ).getMarkdownKanbanBackend()
     const cardPath = join(tempRoot!, 'cards', 'internal-doc.md')
     const original = '# Internal project doc\n\nThis is not an active markdown Kanban card.\n'
     mockState.project = {
@@ -121,9 +152,8 @@ describe('markdown diagnostics cache', () => {
   })
 
   test('missing markdown config is persisted as the default config', async () => {
-    const { getDefaultMarkdownConfig, getKanbanStorageConfig } = await import(
-      '../../src/main/services/kanban-backend'
-    )
+    const { getDefaultMarkdownConfig, getKanbanStorageConfig } =
+      await import('../../src/main/services/kanban-backend')
     mockState.project = {
       ...mockState.project!,
       kanban_markdown_config: null
@@ -139,13 +169,14 @@ describe('markdown diagnostics cache', () => {
       'proj-cache',
       JSON.stringify(getDefaultMarkdownConfig())
     )
-    expect(mockState.project?.kanban_markdown_config).toBe(JSON.stringify(getDefaultMarkdownConfig()))
+    expect(mockState.project?.kanban_markdown_config).toBe(
+      JSON.stringify(getDefaultMarkdownConfig())
+    )
   })
 
   test('malformed markdown config JSON is persisted as the default config', async () => {
-    const { getDefaultMarkdownConfig, getKanbanStorageConfig } = await import(
-      '../../src/main/services/kanban-backend'
-    )
+    const { getDefaultMarkdownConfig, getKanbanStorageConfig } =
+      await import('../../src/main/services/kanban-backend')
     mockState.project = {
       ...mockState.project!,
       kanban_markdown_config: '{not valid json'
@@ -164,9 +195,8 @@ describe('markdown diagnostics cache', () => {
   })
 
   test('invalid markdown config shape is persisted as the default config', async () => {
-    const { getDefaultMarkdownConfig, getKanbanStorageConfig } = await import(
-      '../../src/main/services/kanban-backend'
-    )
+    const { getDefaultMarkdownConfig, getKanbanStorageConfig } =
+      await import('../../src/main/services/kanban-backend')
     mockState.project = {
       ...mockState.project!,
       kanban_markdown_config: JSON.stringify({ layout: 'single-folder', singleFolder: '' })
@@ -185,7 +215,9 @@ describe('markdown diagnostics cache', () => {
   })
 
   test('create rejects an explicit id that already exists before writing a new file', async () => {
-    const backend = (await import('../../src/main/services/kanban-backend')).getMarkdownKanbanBackend()
+    const backend = (
+      await import('../../src/main/services/kanban-backend')
+    ).getMarkdownKanbanBackend()
     const cardsPath = join(tempRoot!, 'cards')
     const existingPath = join(cardsPath, 'existing.md')
     const existing = ['---', 'id: existing', 'title: Existing', '---', 'Existing body'].join('\n')
@@ -207,7 +239,9 @@ describe('markdown diagnostics cache', () => {
   })
 
   test('create rejects an externally added id after an empty index was cached', async () => {
-    const backend = (await import('../../src/main/services/kanban-backend')).getMarkdownKanbanBackend()
+    const backend = (
+      await import('../../src/main/services/kanban-backend')
+    ).getMarkdownKanbanBackend()
     const cardsPath = join(tempRoot!, 'cards')
     backend.invalidate('proj-cache')
 
@@ -218,37 +252,52 @@ describe('markdown diagnostics cache', () => {
       'utf-8'
     )
 
-    await expect(backend.create('proj-cache', {
-      id: 'external-card',
-      project_id: 'proj-cache',
-      title: 'Created From Stale Cache'
-    })).rejects.toThrow(/already exists/i)
+    await expect(
+      backend.create('proj-cache', {
+        id: 'external-card',
+        project_id: 'proj-cache',
+        title: 'Created From Stale Cache'
+      })
+    ).rejects.toThrow(/already exists/i)
 
     expect(await markdownFiles(cardsPath)).toEqual(['external.md'])
   })
 
   test('mutations reject duplicates introduced after the index was cached', async () => {
-    const backend = (await import('../../src/main/services/kanban-backend')).getMarkdownKanbanBackend()
+    const backend = (
+      await import('../../src/main/services/kanban-backend')
+    ).getMarkdownKanbanBackend()
     const cardsPath = join(tempRoot!, 'cards')
     const originalPath = join(cardsPath, 'original.md')
     const duplicatePath = join(cardsPath, 'duplicate.md')
-    const original = ['---', 'id: stale-card', 'title: Original Card', '---', 'Original body'].join('\n')
-    const duplicate = ['---', 'id: stale-card', 'title: Duplicate Card', '---', 'Duplicate body'].join('\n')
+    const original = ['---', 'id: stale-card', 'title: Original Card', '---', 'Original body'].join(
+      '\n'
+    )
+    const duplicate = [
+      '---',
+      'id: stale-card',
+      'title: Duplicate Card',
+      '---',
+      'Duplicate body'
+    ].join('\n')
     await writeFile(originalPath, original, 'utf-8')
     backend.invalidate('proj-cache')
 
     await backend.list('proj-cache', true)
     await writeFile(duplicatePath, duplicate, 'utf-8')
 
-    await expect(backend.update('proj-cache', 'stale-card', { title: 'Updated From Stale Cache' }))
-      .rejects.toThrow(/duplicate/i)
+    await expect(
+      backend.update('proj-cache', 'stale-card', { title: 'Updated From Stale Cache' })
+    ).rejects.toThrow(/duplicate/i)
 
     expect(await readFile(originalPath, 'utf-8')).toBe(original)
     expect(await readFile(duplicatePath, 'utf-8')).toBe(duplicate)
   })
 
   test('create rejects an explicit id that is currently duplicate-blocked', async () => {
-    const backend = (await import('../../src/main/services/kanban-backend')).getMarkdownKanbanBackend()
+    const backend = (
+      await import('../../src/main/services/kanban-backend')
+    ).getMarkdownKanbanBackend()
     const cardsPath = join(tempRoot!, 'cards')
     await writeFile(
       join(cardsPath, 'duplicate-a.md'),
@@ -276,7 +325,9 @@ describe('markdown diagnostics cache', () => {
   })
 
   test('create rejects blank public fields before writing markdown files', async () => {
-    const backend = (await import('../../src/main/services/kanban-backend')).getMarkdownKanbanBackend()
+    const backend = (
+      await import('../../src/main/services/kanban-backend')
+    ).getMarkdownKanbanBackend()
     const cardsPath = join(tempRoot!, 'cards')
     mockState.runtimeRows = []
 
@@ -300,7 +351,9 @@ describe('markdown diagnostics cache', () => {
   })
 
   test('create still writes a normal markdown card', async () => {
-    const backend = (await import('../../src/main/services/kanban-backend')).getMarkdownKanbanBackend()
+    const backend = (
+      await import('../../src/main/services/kanban-backend')
+    ).getMarkdownKanbanBackend()
     mockState.runtimeRows = []
 
     const ticket = await backend.create('proj-cache', {
@@ -365,42 +418,41 @@ describe('markdown diagnostics cache', () => {
       [{ draft_key: 'draft', project_id: 'other-project', title: 'One' }],
       /project_id does not match/i
     ]
-  ])('createBatch rejects %s before writing markdown files', async (_name, drafts, errorPattern) => {
-    const backend = (await import('../../src/main/services/kanban-backend')).getMarkdownKanbanBackend()
-    mockState.runtimeRows = []
-    backend.invalidate('proj-cache')
+  ])(
+    'createBatch rejects %s before writing markdown files',
+    async (_name, drafts, errorPattern) => {
+      const backend = (
+        await import('../../src/main/services/kanban-backend')
+      ).getMarkdownKanbanBackend()
+      mockState.runtimeRows = []
+      backend.invalidate('proj-cache')
 
-    await expect(backend.createBatch('proj-cache', { drafts })).rejects.toThrow(errorPattern)
+      await expect(backend.createBatch('proj-cache', { drafts })).rejects.toThrow(errorPattern)
 
-    expect(await markdownFiles(join(tempRoot!, 'cards'))).toEqual([])
-    expect(mockState.runtimeRows).toEqual([])
-  })
+      expect(await markdownFiles(join(tempRoot!, 'cards'))).toEqual([])
+      expect(mockState.runtimeRows).toEqual([])
+    }
+  )
 
   test('update rejects blank title before rewriting markdown files', async () => {
-    const backend = (await import('../../src/main/services/kanban-backend')).getMarkdownKanbanBackend()
+    const backend = (
+      await import('../../src/main/services/kanban-backend')
+    ).getMarkdownKanbanBackend()
     const cardPath = join(tempRoot!, 'cards', 'card.md')
     const original = ['---', 'id: card', 'title: Card', '---', 'Body'].join('\n')
     await writeFile(cardPath, original, 'utf-8')
     backend.invalidate('proj-cache')
 
-    await expect(backend.update('proj-cache', 'card', { title: '   ' })).rejects.toThrow(/title.*non-empty/i)
+    await expect(backend.update('proj-cache', 'card', { title: '   ' })).rejects.toThrow(
+      /title.*non-empty/i
+    )
 
     expect(await readFile(cardPath, 'utf-8')).toBe(original)
   })
 
   test.each([
-    [
-      'blank id',
-      [{ id: '   ', title: 'Blank ID' }],
-      undefined,
-      /id.*non-empty/i
-    ],
-    [
-      'blank title',
-      [{ id: 'ticket', title: '   ' }],
-      undefined,
-      /title.*non-empty/i
-    ],
+    ['blank id', [{ id: '   ', title: 'Blank ID' }], undefined, /id.*non-empty/i],
+    ['blank title', [{ id: 'ticket', title: '   ' }], undefined, /title.*non-empty/i],
     [
       'blank dependent id',
       [{ id: 'ticket', title: 'Ticket' }],
@@ -413,24 +465,35 @@ describe('markdown diagnostics cache', () => {
       [{ dependentId: 'ticket', blockerId: '   ' }],
       /blockerId.*non-empty/i
     ]
-  ] as Array<[
-    string,
-    Array<{ id: string; title: string }>,
-    Array<{ dependentId: string; blockerId: string }> | undefined,
-    RegExp
-  ]>)('importTickets rejects %s before writing markdown files', async (_name, tickets, dependencies, errorPattern) => {
-    const backend = (await import('../../src/main/services/kanban-backend')).getMarkdownKanbanBackend()
-    mockState.runtimeRows = []
-    backend.invalidate('proj-cache')
+  ] as Array<
+    [
+      string,
+      Array<{ id: string; title: string }>,
+      Array<{ dependentId: string; blockerId: string }> | undefined,
+      RegExp
+    ]
+  >)(
+    'importTickets rejects %s before writing markdown files',
+    async (_name, tickets, dependencies, errorPattern) => {
+      const backend = (
+        await import('../../src/main/services/kanban-backend')
+      ).getMarkdownKanbanBackend()
+      mockState.runtimeRows = []
+      backend.invalidate('proj-cache')
 
-    await expect(backend.importTickets('proj-cache', tickets, dependencies)).rejects.toThrow(errorPattern)
+      await expect(backend.importTickets('proj-cache', tickets, dependencies)).rejects.toThrow(
+        errorPattern
+      )
 
-    expect(await markdownFiles(join(tempRoot!, 'cards'))).toEqual([])
-    expect(mockState.runtimeRows).toEqual([])
-  })
+      expect(await markdownFiles(join(tempRoot!, 'cards'))).toEqual([])
+      expect(mockState.runtimeRows).toEqual([])
+    }
+  )
 
   test('createBatch rolls back created files and runtime rows when dependency creation fails', async () => {
-    const backend = (await import('../../src/main/services/kanban-backend')).getMarkdownKanbanBackend()
+    const backend = (
+      await import('../../src/main/services/kanban-backend')
+    ).getMarkdownKanbanBackend()
     mockState.runtimeRows = []
     const addDependency = vi
       .spyOn(backend, 'addDependency')
@@ -484,7 +547,8 @@ describe('markdown diagnostics cache', () => {
   })
 
   test('explicit folder creation creates folders for an unsaved markdown config', async () => {
-    const { createConfiguredMarkdownFolders } = await import('../../src/main/services/kanban-backend')
+    const { createConfiguredMarkdownFolders } =
+      await import('../../src/main/services/kanban-backend')
     const todo = join(tempRoot!, 'new-board', 'todo')
     const inProgress = join(tempRoot!, 'new-board', 'in-progress')
     const done = join(tempRoot!, 'new-board', 'done')
@@ -512,9 +576,30 @@ describe('markdown diagnostics cache', () => {
     await mkdir(todoFolder, { recursive: true })
     await mkdir(inProgressFolder, { recursive: true })
     await mkdir(doneFolder, { recursive: true })
-    const todoCard = ['---', 'id: todo-card', 'title: Todo', 'column: todo', '---', 'Todo body'].join('\n')
-    const reviewCard = ['---', 'id: review-card', 'title: Review', 'column: review', '---', 'Review body'].join('\n')
-    const doneCard = ['---', 'id: done-card', 'title: Done', 'column: done', '---', 'Done body'].join('\n')
+    const todoCard = [
+      '---',
+      'id: todo-card',
+      'title: Todo',
+      'column: todo',
+      '---',
+      'Todo body'
+    ].join('\n')
+    const reviewCard = [
+      '---',
+      'id: review-card',
+      'title: Review',
+      'column: review',
+      '---',
+      'Review body'
+    ].join('\n')
+    const doneCard = [
+      '---',
+      'id: done-card',
+      'title: Done',
+      'column: done',
+      '---',
+      'Done body'
+    ].join('\n')
     await writeFile(join(tempRoot!, 'cards', 'todo-card.md'), todoCard, 'utf-8')
     await writeFile(join(tempRoot!, 'cards', 'review-card.md'), reviewCard, 'utf-8')
     await writeFile(join(tempRoot!, 'cards', 'done-card.md'), doneCard, 'utf-8')
@@ -535,15 +620,17 @@ describe('markdown diagnostics cache', () => {
     expect(await readFile(join(todoFolder, 'todo-card.md'), 'utf-8')).toBe(todoCard)
     expect(await readFile(join(inProgressFolder, 'review-card.md'), 'utf-8')).toBe(reviewCard)
     expect(await readFile(join(doneFolder, 'done-card.md'), 'utf-8')).toBe(doneCard)
-    expect(mockState.project?.kanban_markdown_config).toBe(JSON.stringify({
-      layout: 'status-folders',
-      singleFolder: 'cards',
-      statusFolders: {
-        todo: 'cards/todo',
-        in_progress: 'cards/in-progress',
-        done: 'cards/done'
-      }
-    }))
+    expect(mockState.project?.kanban_markdown_config).toBe(
+      JSON.stringify({
+        layout: 'status-folders',
+        singleFolder: 'cards',
+        statusFolders: {
+          todo: 'cards/todo',
+          in_progress: 'cards/in-progress',
+          done: 'cards/done'
+        }
+      })
+    )
   })
 
   test('saving a status-folders to single-folder layout change flattens existing cards', async () => {
@@ -564,9 +651,30 @@ describe('markdown diagnostics cache', () => {
     await mkdir(join(tempRoot!, 'cards', 'in-progress'), { recursive: true })
     await mkdir(join(tempRoot!, 'cards', 'done'), { recursive: true })
     await mkdir(join(tempRoot!, 'flat-cards'), { recursive: true })
-    const todoCard = ['---', 'id: todo-card', 'title: Todo', 'column: todo', '---', 'Todo body'].join('\n')
-    const reviewCard = ['---', 'id: review-card', 'title: Review', 'column: review', '---', 'Review body'].join('\n')
-    const doneCard = ['---', 'id: done-card', 'title: Done', 'column: done', '---', 'Done body'].join('\n')
+    const todoCard = [
+      '---',
+      'id: todo-card',
+      'title: Todo',
+      'column: todo',
+      '---',
+      'Todo body'
+    ].join('\n')
+    const reviewCard = [
+      '---',
+      'id: review-card',
+      'title: Review',
+      'column: review',
+      '---',
+      'Review body'
+    ].join('\n')
+    const doneCard = [
+      '---',
+      'id: done-card',
+      'title: Done',
+      'column: done',
+      '---',
+      'Done body'
+    ].join('\n')
     await writeFile(join(tempRoot!, 'cards', 'todo', 'todo-card.md'), todoCard, 'utf-8')
     await writeFile(join(tempRoot!, 'cards', 'in-progress', 'review-card.md'), reviewCard, 'utf-8')
     await writeFile(join(tempRoot!, 'cards', 'done', 'done-card.md'), doneCard, 'utf-8')
@@ -582,10 +690,14 @@ describe('markdown diagnostics cache', () => {
     })
 
     await expect(access(join(tempRoot!, 'cards', 'todo', 'todo-card.md'))).rejects.toThrow()
-    await expect(access(join(tempRoot!, 'cards', 'in-progress', 'review-card.md'))).rejects.toThrow()
+    await expect(
+      access(join(tempRoot!, 'cards', 'in-progress', 'review-card.md'))
+    ).rejects.toThrow()
     await expect(access(join(tempRoot!, 'cards', 'done', 'done-card.md'))).rejects.toThrow()
     expect(await readFile(join(tempRoot!, 'flat-cards', 'todo-card.md'), 'utf-8')).toBe(todoCard)
-    expect(await readFile(join(tempRoot!, 'flat-cards', 'review-card.md'), 'utf-8')).toBe(reviewCard)
+    expect(await readFile(join(tempRoot!, 'flat-cards', 'review-card.md'), 'utf-8')).toBe(
+      reviewCard
+    )
     expect(await readFile(join(tempRoot!, 'flat-cards', 'done-card.md'), 'utf-8')).toBe(doneCard)
   })
 
@@ -597,8 +709,22 @@ describe('markdown diagnostics cache', () => {
     await mkdir(todoFolder, { recursive: true })
     await mkdir(inProgressFolder, { recursive: true })
     await mkdir(doneFolder, { recursive: true })
-    const sourceCard = ['---', 'id: source-card', 'title: Source', 'column: todo', '---', 'Source body'].join('\n')
-    const existingTarget = ['---', 'id: existing-card', 'title: Existing', 'column: todo', '---', 'Existing body'].join('\n')
+    const sourceCard = [
+      '---',
+      'id: source-card',
+      'title: Source',
+      'column: todo',
+      '---',
+      'Source body'
+    ].join('\n')
+    const existingTarget = [
+      '---',
+      'id: existing-card',
+      'title: Existing',
+      'column: todo',
+      '---',
+      'Existing body'
+    ].join('\n')
     await writeFile(join(tempRoot!, 'cards', 'card.md'), sourceCard, 'utf-8')
     await writeFile(join(todoFolder, 'card.md'), existingTarget, 'utf-8')
 
@@ -620,7 +746,9 @@ describe('markdown diagnostics cache', () => {
   })
 
   test('status-folder move destination failure leaves source frontmatter unchanged', async () => {
-    const backend = (await import('../../src/main/services/kanban-backend')).getMarkdownKanbanBackend()
+    const backend = (
+      await import('../../src/main/services/kanban-backend')
+    ).getMarkdownKanbanBackend()
     mockState.project = {
       ...mockState.project!,
       kanban_markdown_config: JSON.stringify({
@@ -636,7 +764,15 @@ describe('markdown diagnostics cache', () => {
     await writeFile(join(tempRoot!, 'cards', 'in-progress'), 'not a directory', 'utf-8')
     await mkdir(join(tempRoot!, 'cards', 'done'), { recursive: true })
     const sourcePath = join(tempRoot!, 'cards', 'todo', 'card.md')
-    const original = ['---', 'id: card', 'title: Card', 'column: todo', 'sort_order: 0', '---', 'Body'].join('\n')
+    const original = [
+      '---',
+      'id: card',
+      'title: Card',
+      'column: todo',
+      'sort_order: 0',
+      '---',
+      'Body'
+    ].join('\n')
     await writeFile(sourcePath, original, 'utf-8')
     backend.invalidate('proj-cache')
 
@@ -646,7 +782,9 @@ describe('markdown diagnostics cache', () => {
   })
 
   test('status-folder move source removal failure removes destination rollback file', async () => {
-    const backend = (await import('../../src/main/services/kanban-backend')).getMarkdownKanbanBackend()
+    const backend = (
+      await import('../../src/main/services/kanban-backend')
+    ).getMarkdownKanbanBackend()
     mockState.project = {
       ...mockState.project!,
       kanban_markdown_config: JSON.stringify({
@@ -681,7 +819,9 @@ describe('markdown diagnostics cache', () => {
   })
 
   test('importing a changed column relocates an existing status-folder card', async () => {
-    const backend = (await import('../../src/main/services/kanban-backend')).getMarkdownKanbanBackend()
+    const backend = (
+      await import('../../src/main/services/kanban-backend')
+    ).getMarkdownKanbanBackend()
     mockState.project = {
       ...mockState.project!,
       kanban_markdown_config: JSON.stringify({
@@ -720,8 +860,153 @@ describe('markdown diagnostics cache', () => {
     expect(moved).toContain('Imported body')
   })
 
+  test('markdown import only replaces dependencies within the selected import set', async () => {
+    const backend = (
+      await import('../../src/main/services/kanban-backend')
+    ).getMarkdownKanbanBackend()
+    const cardsPath = join(tempRoot!, 'cards')
+    await writeFile(
+      join(cardsPath, 'a.md'),
+      [
+        '---',
+        'id: a',
+        'title: A',
+        'created_at: "2026-06-01T00:00:00.000Z"',
+        'dependencies:',
+        '  - blocker_id: b',
+        '    created_at: "2026-06-01T00:00:00.000Z"',
+        '---',
+        'A body'
+      ].join('\n'),
+      'utf-8'
+    )
+    await writeFile(
+      join(cardsPath, 'b.md'),
+      [
+        '---',
+        'id: b',
+        'title: B',
+        'created_at: "2026-06-01T00:00:00.000Z"',
+        'dependencies:',
+        '  - blocker_id: a',
+        '    created_at: "2026-06-01T00:00:00.000Z"',
+        '  - blocker_id: c',
+        '    created_at: "2026-06-01T00:00:00.000Z"',
+        '---',
+        'B body'
+      ].join('\n'),
+      'utf-8'
+    )
+    await writeFile(
+      join(cardsPath, 'c.md'),
+      ['---', 'id: c', 'title: C', 'created_at: "2026-06-01T00:00:00.000Z"', '---', 'C body'].join(
+        '\n'
+      ),
+      'utf-8'
+    )
+    backend.invalidate('proj-cache')
+
+    await expect(
+      backend.importTickets(
+        'proj-cache',
+        [
+          { id: 'b', title: 'Imported B', description: 'Imported B body', column: 'todo' },
+          { id: 'c', title: 'Imported C', description: 'Imported C body', column: 'todo' }
+        ],
+        [{ dependentId: 'c', blockerId: 'b' }]
+      )
+    ).resolves.toEqual({ created: 0, updated: 2, dependencyCount: 1, ignoredDependencyCount: 0 })
+
+    const a = frontmatterOf(await readFile(join(cardsPath, 'a.md'), 'utf-8'))
+    const b = frontmatterOf(await readFile(join(cardsPath, 'b.md'), 'utf-8'))
+    const c = frontmatterOf(await readFile(join(cardsPath, 'c.md'), 'utf-8'))
+    expect(dependencyBlockersOf(a)).toEqual(['b'])
+    expect(dependencyBlockersOf(b)).toEqual(['a'])
+    expect(dependencyBlockersOf(c)).toEqual(['b'])
+  })
+
+  test('archiveAllDone archives done cards and removes dependency edges involving them in one pass', async () => {
+    const backend = (
+      await import('../../src/main/services/kanban-backend')
+    ).getMarkdownKanbanBackend()
+    const cardsPath = join(tempRoot!, 'cards')
+    await writeFile(
+      join(cardsPath, 'todo.md'),
+      [
+        '---',
+        'id: todo',
+        'title: Todo',
+        'column: todo',
+        'created_at: "2026-06-01T00:00:00.000Z"',
+        'dependencies:',
+        '  - blocker_id: done-a',
+        '    created_at: "2026-06-01T00:00:00.000Z"',
+        '  - blocker_id: other',
+        '    created_at: "2026-06-01T00:00:00.000Z"',
+        '---',
+        'Todo body'
+      ].join('\n'),
+      'utf-8'
+    )
+    await writeFile(
+      join(cardsPath, 'done-a.md'),
+      [
+        '---',
+        'id: done-a',
+        'title: Done A',
+        'column: done',
+        'created_at: "2026-06-01T00:00:00.000Z"',
+        'dependencies:',
+        '  - blocker_id: todo',
+        '    created_at: "2026-06-01T00:00:00.000Z"',
+        '---',
+        'Done A body'
+      ].join('\n'),
+      'utf-8'
+    )
+    await writeFile(
+      join(cardsPath, 'done-b.md'),
+      [
+        '---',
+        'id: done-b',
+        'title: Done B',
+        'column: done',
+        'created_at: "2026-06-01T00:00:00.000Z"',
+        '---',
+        'Done B body'
+      ].join('\n'),
+      'utf-8'
+    )
+    await writeFile(
+      join(cardsPath, 'other.md'),
+      [
+        '---',
+        'id: other',
+        'title: Other',
+        'column: todo',
+        'created_at: "2026-06-01T00:00:00.000Z"',
+        '---',
+        'Other body'
+      ].join('\n'),
+      'utf-8'
+    )
+    backend.invalidate('proj-cache')
+
+    await expect(backend.archiveAllDone('proj-cache')).resolves.toBe(2)
+
+    const todo = frontmatterOf(await readFile(join(cardsPath, 'todo.md'), 'utf-8'))
+    const doneA = frontmatterOf(await readFile(join(cardsPath, 'done-a.md'), 'utf-8'))
+    const doneB = frontmatterOf(await readFile(join(cardsPath, 'done-b.md'), 'utf-8'))
+    expect(dependencyBlockersOf(todo)).toEqual(['other'])
+    expect(dependencyBlockersOf(doneA)).toEqual([])
+    expect(typeof doneA.archived_at).toBe('string')
+    expect(typeof doneB.archived_at).toBe('string')
+  })
+
   test('import aborts before creating files when selected markdown id is duplicated', async () => {
-    const backend = (await import('../../src/main/services/kanban-backend')).getMarkdownKanbanBackend()
+    const backend = (
+      await import('../../src/main/services/kanban-backend')
+    ).getMarkdownKanbanBackend()
     const duplicateAPath = join(tempRoot!, 'cards', 'duplicate-a.md')
     const duplicateBPath = join(tempRoot!, 'cards', 'duplicate-b.md')
     const duplicateA = ['---', 'id: duplicate', 'title: Duplicate A', '---', 'A'].join('\n')
@@ -732,18 +1017,28 @@ describe('markdown diagnostics cache', () => {
 
     await expect(
       backend.importTickets('proj-cache', [
-        { id: 'duplicate', title: 'Imported Duplicate', description: 'Should not be written', column: 'todo' }
+        {
+          id: 'duplicate',
+          title: 'Imported Duplicate',
+          description: 'Should not be written',
+          column: 'todo'
+        }
       ])
     ).rejects.toThrow(/duplicated/i)
 
     expect(await readFile(duplicateAPath, 'utf-8')).toBe(duplicateA)
     expect(await readFile(duplicateBPath, 'utf-8')).toBe(duplicateB)
     const files = await readdir(join(tempRoot!, 'cards'))
-    expect(files.filter((file) => file.endsWith('.md')).sort()).toEqual(['duplicate-a.md', 'duplicate-b.md'])
+    expect(files.filter((file) => file.endsWith('.md')).sort()).toEqual([
+      'duplicate-a.md',
+      'duplicate-b.md'
+    ])
   })
 
   test('diagnostics reads do not consume the orphan runtime-state grace scan', async () => {
-    const backend = (await import('../../src/main/services/kanban-backend')).getMarkdownKanbanBackend()
+    const backend = (
+      await import('../../src/main/services/kanban-backend')
+    ).getMarkdownKanbanBackend()
     backend.invalidate('proj-cache')
 
     await backend.list('proj-cache', true)
@@ -762,7 +1057,9 @@ describe('markdown diagnostics cache', () => {
   })
 
   test('duplicate-id runtime rows are preserved while missing rows still expire', async () => {
-    const backend = (await import('../../src/main/services/kanban-backend')).getMarkdownKanbanBackend()
+    const backend = (
+      await import('../../src/main/services/kanban-backend')
+    ).getMarkdownKanbanBackend()
     await writeFile(
       join(tempRoot!, 'cards', 'duplicate-a.md'),
       ['---', 'id: duplicate', 'title: Duplicate A', '---', 'A'].join('\n'),
@@ -793,10 +1090,19 @@ describe('markdown diagnostics cache', () => {
   })
 
   test('invalid known-id runtime rows are preserved while missing rows still expire', async () => {
-    const backend = (await import('../../src/main/services/kanban-backend')).getMarkdownKanbanBackend()
+    const backend = (
+      await import('../../src/main/services/kanban-backend')
+    ).getMarkdownKanbanBackend()
     await writeFile(
       join(tempRoot!, 'cards', 'invalid-known-id.md'),
-      ['---', 'id: invalid-card', 'title: Invalid Card', 'column: invalid-column', '---', 'Body'].join('\n'),
+      [
+        '---',
+        'id: invalid-card',
+        'title: Invalid Card',
+        'column: invalid-column',
+        '---',
+        'Body'
+      ].join('\n'),
       'utf-8'
     )
     mockState.runtimeRows = [
