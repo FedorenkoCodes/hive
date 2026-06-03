@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { BoardAssistantView } from '../../src/renderer/src/components/kanban/BoardAssistantView'
-import { useBoardChatStore, type TicketDraft } from '../../src/renderer/src/stores/useBoardChatStore'
+import {
+  useBoardChatStore,
+  type TicketDraft
+} from '../../src/renderer/src/stores/useBoardChatStore'
 import { useProjectStore } from '../../src/renderer/src/stores/useProjectStore'
 import { useWorktreeStore } from '../../src/renderer/src/stores/useWorktreeStore'
 import { useKanbanStore } from '../../src/renderer/src/stores/useKanbanStore'
@@ -59,7 +62,10 @@ const secondProjectDraft: TicketDraft = {
   createdAt: null
 }
 
-function seedStores(boardMode: 'sticky-tab' | 'toggle', seededDrafts: TicketDraft[] = [boardDraft]) {
+function seedStores(
+  boardMode: 'sticky-tab' | 'toggle',
+  seededDrafts: TicketDraft[] = [boardDraft]
+) {
   useBoardChatStore.setState(useBoardChatStore.getInitialState())
 
   useProjectStore.setState({
@@ -154,7 +160,10 @@ function seedStores(boardMode: 'sticky-tab' | 'toggle', seededDrafts: TicketDraf
   })
 
   const createBatch = vi.fn(
-    (batchProjectId: string, data: { drafts: Array<{ draft_key: string; depends_on?: string[] }> }) => {
+    (
+      batchProjectId: string,
+      data: { drafts: Array<{ draft_key: string; depends_on?: string[] }> }
+    ) => {
       const localDraftKeys = new Set(data.drafts.map((draft) => draft.draft_key))
       return Promise.resolve({
         tickets: data.drafts.map((draft) => ({ id: `${batchProjectId}:${draft.draft_key}` })),
@@ -340,6 +349,76 @@ describe('board assistant create navigation', () => {
     expect(useBoardChatStore.getState().messages.at(-1)?.content).toBe(
       'Created 2 tickets and 0 dependencies.'
     )
+  })
+
+  test('store creation marks successful project batches before reporting partial failures', async () => {
+    seedStores('sticky-tab', [boardDraft, secondProjectDraft])
+    const createBatch = window.kanban.ticket.createBatch as ReturnType<typeof vi.fn>
+    const loadTickets = useKanbanStore.getState().loadTickets as ReturnType<typeof vi.fn>
+    const loadDependencies = useKanbanStore.getState().loadDependencies as ReturnType<typeof vi.fn>
+
+    createBatch.mockImplementation(
+      (
+        batchProjectId: string,
+        data: { drafts: Array<{ draft_key: string; depends_on?: string[] }> }
+      ) => {
+        if (batchProjectId === secondProjectId) {
+          return Promise.reject(new Error('Kanban folder missing'))
+        }
+
+        return Promise.resolve({
+          tickets: data.drafts.map((draft) => ({ id: `${batchProjectId}:${draft.draft_key}` })),
+          dependencies: []
+        })
+      }
+    )
+
+    await useBoardChatStore.getState().createSelected()
+
+    await waitFor(() => expect(createBatch).toHaveBeenCalledTimes(2))
+    expect(loadTickets).toHaveBeenCalledWith(projectId)
+    expect(loadTickets).not.toHaveBeenCalledWith(secondProjectId)
+    expect(loadDependencies).toHaveBeenCalledWith(projectId)
+    expect(loadDependencies).not.toHaveBeenCalledWith(secondProjectId)
+
+    const partiallyCreatedState = useBoardChatStore.getState()
+    expect(partiallyCreatedState.status).toBe('error')
+    expect(partiallyCreatedState.error).toContain('Project Two: Kanban folder missing')
+    expect(
+      partiallyCreatedState.drafts.find((draft) => draft.id === boardDraft.id)?.createdAt
+    ).not.toBeNull()
+    expect(
+      partiallyCreatedState.drafts.find((draft) => draft.id === secondProjectDraft.id)?.createdAt
+    ).toBeNull()
+
+    createBatch.mockClear()
+    createBatch.mockImplementation(
+      (
+        batchProjectId: string,
+        data: { drafts: Array<{ draft_key: string; depends_on?: string[] }> }
+      ) =>
+        Promise.resolve({
+          tickets: data.drafts.map((draft) => ({ id: `${batchProjectId}:${draft.draft_key}` })),
+          dependencies: []
+        })
+    )
+
+    await useBoardChatStore.getState().createSelected()
+
+    await waitFor(() => expect(createBatch).toHaveBeenCalledTimes(1))
+    expect(createBatch).toHaveBeenCalledWith(secondProjectId, {
+      drafts: [
+        expect.objectContaining({
+          draft_key: 'draft-2',
+          project_id: secondProjectId,
+          depends_on: []
+        })
+      ]
+    })
+    expect(
+      useBoardChatStore.getState().drafts.find((draft) => draft.id === secondProjectDraft.id)
+        ?.createdAt
+    ).not.toBeNull()
   })
 
   test('store creation filters dependencies to each project batch', async () => {

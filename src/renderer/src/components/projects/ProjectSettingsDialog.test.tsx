@@ -57,14 +57,17 @@ const baseProject: Project = {
   auto_assign_port: false
 }
 
-function renderDialog(projectOverrides: Partial<Project> = {}) {
-  return render(
-    <ProjectSettingsDialog
-      project={{ ...baseProject, ...projectOverrides }}
-      open={true}
-      onOpenChange={vi.fn()}
-    />
-  )
+function renderDialog(projectOverrides: Partial<Project> = {}, onOpenChange = vi.fn()) {
+  return {
+    ...render(
+      <ProjectSettingsDialog
+        project={{ ...baseProject, ...projectOverrides }}
+        open={true}
+        onOpenChange={onOpenChange}
+      />
+    ),
+    onOpenChange
+  }
 }
 
 describe('ProjectSettingsDialog', () => {
@@ -157,9 +160,10 @@ describe('ProjectSettingsDialog', () => {
 
     await waitFor(() => expect(window.projectOps.detectSetupSuggestions).toHaveBeenCalled())
 
-    expect(
-      screen.getByRole('button', { name: /worktree create script/i })
-    ).toHaveProperty('ariaExpanded', 'false')
+    expect(screen.getByRole('button', { name: /worktree create script/i })).toHaveProperty(
+      'ariaExpanded',
+      'false'
+    )
     expect(screen.queryByText(/Advanced\. When set/)).toBeNull()
     expect(screen.queryByPlaceholderText(/git worktree add --no-checkout/)).toBeNull()
   })
@@ -169,9 +173,10 @@ describe('ProjectSettingsDialog', () => {
 
     await waitFor(() => expect(window.projectOps.detectSetupSuggestions).toHaveBeenCalled())
 
-    expect(
-      screen.getByRole('button', { name: /worktree create script/i })
-    ).toHaveProperty('ariaExpanded', 'true')
+    expect(screen.getByRole('button', { name: /worktree create script/i })).toHaveProperty(
+      'ariaExpanded',
+      'true'
+    )
     expect(screen.getByDisplayValue('echo custom-create')).toBeTruthy()
   })
 
@@ -183,9 +188,10 @@ describe('ProjectSettingsDialog', () => {
 
     await user.click(screen.getByRole('button', { name: /worktree create script/i }))
 
-    expect(
-      screen.getByRole('button', { name: /worktree create script/i })
-    ).toHaveProperty('ariaExpanded', 'true')
+    expect(screen.getByRole('button', { name: /worktree create script/i })).toHaveProperty(
+      'ariaExpanded',
+      'true'
+    )
     expect(screen.getByPlaceholderText(/git worktree add --no-checkout/)).toBeTruthy()
   })
 
@@ -272,6 +278,36 @@ describe('ProjectSettingsDialog', () => {
     expect(mocks.loadTickets).toHaveBeenCalledWith('project-1')
     expect(mocks.updateProject.mock.calls[0][1]).not.toHaveProperty('kanban_storage_mode')
     expect(mocks.updateProject.mock.calls[0][1]).not.toHaveProperty('kanban_markdown_config')
+  })
+
+  it('keeps non-kanban settings saved when Kanban mode change fails', async () => {
+    const user = userEvent.setup()
+    mocks.kanbanConfigSetMode.mockResolvedValue({
+      success: true,
+      value: {
+        success: false,
+        error: 'Project has internal tickets. Move or archive them before switching modes.'
+      }
+    })
+    const { onOpenChange } = renderDialog()
+
+    await waitFor(() => expect(mocks.kanbanConfigGet).toHaveBeenCalled())
+    await user.click(screen.getByRole('button', { name: 'Markdown' }))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(mocks.updateProject).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(mocks.kanbanConfigSetMode).toHaveBeenCalledWith('project-1', 'markdown')
+    )
+    expect(mocks.updateProject.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.kanbanConfigSetMode.mock.invocationCallOrder[0]
+    )
+    expect(mocks.loadProjects).toHaveBeenCalled()
+    expect(mocks.loadTickets).not.toHaveBeenCalled()
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+    expect(
+      screen.getByText('Project has internal tickets. Move or archive them before switching modes.')
+    ).toBeTruthy()
   })
 
   it('stores an inside-project folder picker selection as a relative path', async () => {
@@ -426,16 +462,18 @@ describe('ProjectSettingsDialog', () => {
 
     await user.click(screen.getByRole('button', { name: 'Create folder and enable' }))
 
-    await waitFor(() => expect(mocks.updateProject).toHaveBeenCalled())
-    expect(mocks.kanbanConfigCreateFolders).toHaveBeenCalledWith('project-1', {
-      layout: 'single-folder',
-      singleFolder: 'docs/kanban',
-      statusFolders: {
-        todo: 'docs/kanban/todo',
-        in_progress: 'docs/kanban/in-progress',
-        done: 'docs/kanban/done'
-      }
-    })
+    await waitFor(() =>
+      expect(mocks.kanbanConfigCreateFolders).toHaveBeenCalledWith('project-1', {
+        layout: 'single-folder',
+        singleFolder: 'docs/kanban',
+        statusFolders: {
+          todo: 'docs/kanban/todo',
+          in_progress: 'docs/kanban/in-progress',
+          done: 'docs/kanban/done'
+        }
+      })
+    )
+    expect(mocks.updateProject).toHaveBeenCalledTimes(2)
     expect(mocks.kanbanConfigUpdate).toHaveBeenCalledTimes(2)
     expect(mocks.kanbanConfigSetMode).toHaveBeenLastCalledWith('project-1', 'markdown')
   })

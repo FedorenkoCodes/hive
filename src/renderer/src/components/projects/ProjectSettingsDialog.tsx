@@ -113,14 +113,15 @@ export function ProjectSettingsDialog({
           setKanbanMode(config.mode)
           setKanbanLayout(config.markdown.layout)
           setSingleFolder(
-            config.markdown.layout === 'single-folder' ? config.markdown.singleFolder : 'docs/kanban'
+            config.markdown.layout === 'single-folder'
+              ? config.markdown.singleFolder
+              : 'docs/kanban'
           )
-          const statusFolders =
-            config.markdown.statusFolders ?? {
-              todo: 'docs/kanban/todo',
-              in_progress: 'docs/kanban/in-progress',
-              done: 'docs/kanban/done'
-            }
+          const statusFolders = config.markdown.statusFolders ?? {
+            todo: 'docs/kanban/todo',
+            in_progress: 'docs/kanban/in-progress',
+            done: 'docs/kanban/done'
+          }
           setTodoFolder(statusFolders.todo)
           setInProgressFolder(statusFolders.in_progress)
           setDoneFolder(statusFolders.done)
@@ -259,7 +260,8 @@ export function ProjectSettingsDialog({
 
   const extractMissingFolderPath = (message: string): string => {
     const quotedPath = message.match(/'([^']+)'/)?.[1]
-    const path = quotedPath ?? (kanbanLayout === 'single-folder' ? singleFolder : 'configured folders')
+    const path =
+      quotedPath ?? (kanbanLayout === 'single-folder' ? singleFolder : 'configured folders')
     const projectPrefix = project.path.endsWith('/') ? project.path : `${project.path}/`
     return path.startsWith(projectPrefix) ? path.slice(projectPrefix.length) : path
   }
@@ -269,6 +271,29 @@ export function ProjectSettingsDialog({
     setKanbanConfigError(null)
     setCanCreateKanbanFolders(false)
     try {
+      try {
+        const success = await updateProject(project.id, {
+          setup_script: setupScript.trim() || null,
+          run_script: runScript.trim() || null,
+          archive_script: archiveScript.trim() || null,
+          worktree_create_script: worktreeCreateScript.trim() || null,
+          custom_commands: customCommands.filter(
+            (command) => command.name.trim() !== '' && command.prompt.trim() !== ''
+          ),
+          custom_icon: customIcon,
+          auto_assign_port: autoAssignPort
+        })
+        if (!success) {
+          toast.error('Failed to save project settings')
+          return
+        }
+
+        await loadProjects()
+      } catch {
+        toast.error('Failed to save project settings')
+        return
+      }
+
       if (kanbanMode === 'markdown') {
         unwrapEnvelope(await window.kanban.config.update(project.id, buildMarkdownConfig()))
       }
@@ -278,25 +303,9 @@ export function ProjectSettingsDialog({
         return
       }
 
-      const success = await updateProject(project.id, {
-        setup_script: setupScript.trim() || null,
-        run_script: runScript.trim() || null,
-        archive_script: archiveScript.trim() || null,
-        worktree_create_script: worktreeCreateScript.trim() || null,
-        custom_commands: customCommands.filter(
-          (command) => command.name.trim() !== '' && command.prompt.trim() !== ''
-        ),
-        custom_icon: customIcon,
-        auto_assign_port: autoAssignPort
-      })
-      if (success) {
-        await loadProjects()
-        await useKanbanStore.getState().loadTickets(project.id)
-        toast.success('Project settings saved')
-        onOpenChange(false)
-      } else {
-        toast.error('Failed to save project settings')
-      }
+      await useKanbanStore.getState().loadTickets(project.id)
+      toast.success('Project settings saved')
+      onOpenChange(false)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to save Kanban settings'
       setKanbanConfigError(message)
@@ -315,7 +324,9 @@ export function ProjectSettingsDialog({
       toast.success('Kanban folders created')
       await handleSave()
     } catch (error) {
-      setKanbanConfigError(error instanceof Error ? error.message : 'Failed to create Kanban folders')
+      setKanbanConfigError(
+        error instanceof Error ? error.message : 'Failed to create Kanban folders'
+      )
     } finally {
       setSaving(false)
     }
@@ -613,30 +624,27 @@ export function ProjectSettingsDialog({
                       <code className="font-mono text-[0.7rem]">git worktree add</code> call. Use
                       for repos that need special handling (e.g. git-crypt, sparse-checkout). The
                       script must create a worktree at{' '}
-                      <code className="font-mono text-[0.7rem]">$HIVE_WORKTREE_PATH</code> on
-                      branch <code className="font-mono text-[0.7rem]">$HIVE_BRANCH_NAME</code>.
-                      Available env vars:{' '}
-                      <code className="font-mono text-[0.7rem]">HIVE_WORKTREE_PATH</code>,{' '}
+                      <code className="font-mono text-[0.7rem]">$HIVE_WORKTREE_PATH</code> on branch{' '}
+                      <code className="font-mono text-[0.7rem]">$HIVE_BRANCH_NAME</code>. Available
+                      env vars: <code className="font-mono text-[0.7rem]">HIVE_WORKTREE_PATH</code>,{' '}
                       <code className="font-mono text-[0.7rem]">HIVE_BRANCH_NAME</code>,{' '}
                       <code className="font-mono text-[0.7rem]">HIVE_BASE_BRANCH</code>{' '}
                       (human-readable base branch name),{' '}
-                      <code className="font-mono text-[0.7rem]">HIVE_BASE_REF</code> (git ref to
-                      use with <code className="font-mono text-[0.7rem]">git worktree add</code>;
-                      equals <code className="font-mono text-[0.7rem]">HIVE_BASE_BRANCH</code> in
-                      most flows, but is{' '}
-                      <code className="font-mono text-[0.7rem]">FETCH_HEAD</code> when checking out
-                      a pull-request ref),{' '}
+                      <code className="font-mono text-[0.7rem]">HIVE_BASE_REF</code> (git ref to use
+                      with <code className="font-mono text-[0.7rem]">git worktree add</code>; equals{' '}
+                      <code className="font-mono text-[0.7rem]">HIVE_BASE_BRANCH</code> in most
+                      flows, but is <code className="font-mono text-[0.7rem]">FETCH_HEAD</code> when
+                      checking out a pull-request ref),{' '}
                       <code className="font-mono text-[0.7rem]">HIVE_PROJECT_PATH</code>,{' '}
                       <code className="font-mono text-[0.7rem]">HIVE_WORKTREE_MODE</code> (
                       <code className="font-mono text-[0.7rem]">new</code> |{' '}
                       <code className="font-mono text-[0.7rem]">existing</code> |{' '}
                       <code className="font-mono text-[0.7rem]">duplicate</code>). In{' '}
-                      <code className="font-mono text-[0.7rem]">duplicate</code> mode, also
-                      receives{' '}
-                      <code className="font-mono text-[0.7rem]">HIVE_SOURCE_WORKTREE_PATH</code>{' '}
-                      and <code className="font-mono text-[0.7rem]">HIVE_SOURCE_BRANCH</code>.
-                      Scripts run via <code className="font-mono text-[0.7rem]">/bin/sh -c</code>{' '}
-                      by default; a{' '}
+                      <code className="font-mono text-[0.7rem]">duplicate</code> mode, also receives{' '}
+                      <code className="font-mono text-[0.7rem]">HIVE_SOURCE_WORKTREE_PATH</code> and{' '}
+                      <code className="font-mono text-[0.7rem]">HIVE_SOURCE_BRANCH</code>. Scripts
+                      run via <code className="font-mono text-[0.7rem]">/bin/sh -c</code> by
+                      default; a{' '}
                       <code className="font-mono text-[0.7rem]">#!/usr/bin/env bash</code> or{' '}
                       <code className="font-mono text-[0.7rem]">#!/bin/bash</code> shebang on the
                       first line switches to{' '}

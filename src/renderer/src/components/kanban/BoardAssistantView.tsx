@@ -1209,12 +1209,18 @@ export function BoardAssistantView({
 
         const draftsByProject = new Map<string, typeof draftsToCreate>()
         for (const draft of draftsToCreate) {
-          draftsByProject.set(draft.projectId, [...(draftsByProject.get(draft.projectId) ?? []), draft])
+          draftsByProject.set(draft.projectId, [
+            ...(draftsByProject.get(draft.projectId) ?? []),
+            draft
+          ])
         }
-        const results = await Promise.all(
-          [...draftsByProject.entries()].map(([projectId, projectDrafts]) => {
-            const projectDraftKeys = new Set(projectDrafts.map((draft) => draft.draftKey))
-            return kanban.ticket.createBatch(projectId, {
+        const batchRequests = [...draftsByProject.entries()].map(([projectId, projectDrafts]) => {
+          const projectDraftKeys = new Set(projectDrafts.map((draft) => draft.draftKey))
+          return {
+            projectId,
+            projectName: projectDrafts[0]?.projectName ?? projectId,
+            projectDrafts,
+            request: kanban.ticket.createBatch(projectId, {
               drafts: projectDrafts.map((draft) => ({
                 draft_key: draft.draftKey,
                 project_id: draft.projectId,
@@ -1224,31 +1230,80 @@ export function BoardAssistantView({
                 depends_on: draft.dependsOn.filter((key) => projectDraftKeys.has(key))
               }))
             })
-          })
-        )
-        const createdCount = results.reduce((total, result) => total + result.tickets.length, 0)
-        const dependencyCount = results.reduce((total, result) => total + result.dependencies.length, 0)
+          }
+        })
+        const results = await Promise.allSettled(batchRequests.map((batch) => batch.request))
+        let createdCount = 0
+        let dependencyCount = 0
+        const createdDraftIds: string[] = []
+        const successfulProjectIds: string[] = []
+        const failures: string[] = []
 
-        for (const projectId of draftsByProject.keys()) {
-          await useKanbanStore.getState().loadTickets(projectId)
-          await useKanbanStore.getState().loadDependencies(projectId)
+        results.forEach((result, index) => {
+          const batch = batchRequests[index]
+          if (result.status === 'fulfilled') {
+            createdCount += result.value.tickets.length
+            dependencyCount += result.value.dependencies.length
+            createdDraftIds.push(...batch.projectDrafts.map((draft) => draft.id))
+            successfulProjectIds.push(batch.projectId)
+            return
+          }
+
+          const message =
+            result.reason instanceof Error ? result.reason.message : 'Failed to create tickets.'
+          failures.push(`${batch.projectName}: ${message}`)
+        })
+
+        if (createdDraftIds.length > 0) {
+          markDraftsCreated(createdDraftIds)
         }
 
-        markDraftsCreated(draftsToCreate.map((draft) => draft.id))
-        addLocalSystemMessage(
-          `Created ${createdCount} ticket${createdCount === 1 ? '' : 's'} and ${dependencyCount} dependenc${dependencyCount === 1 ? 'y' : 'ies'}.`
-        )
+        for (const projectId of successfulProjectIds) {
+          try {
+            await useKanbanStore.getState().loadTickets(projectId)
+            await useKanbanStore.getState().loadDependencies(projectId)
+          } catch (reloadError) {
+            const message =
+              reloadError instanceof Error
+                ? reloadError.message
+                : 'Failed to reload created tickets.'
+            failures.push(`${projectId}: ${message}`)
+          }
+        }
+
+        if (createdCount > 0) {
+          addLocalSystemMessage(
+            `Created ${createdCount} ticket${createdCount === 1 ? '' : 's'} and ${dependencyCount} dependenc${dependencyCount === 1 ? 'y' : 'ies'}.`
+          )
+        }
+
+        if (failures.length > 0) {
+          const message =
+            failures.length === 1
+              ? failures[0]
+              : `Failed to create tickets for ${failures.length} projects: ${failures.join('; ')}`
+          setError(message)
+          setStatus('error')
+          addLocalSystemMessage(
+            createdCount > 0
+              ? `Some selected tickets were created, but ${message}`
+              : `Failed to create selected tickets: ${message}`
+          )
+          toast.error(message)
+          return
+        }
+
+        setError(null)
+        setStatus('idle')
         navigateToBoard()
-        toast.success(
-          `Created ${createdCount} ticket${createdCount === 1 ? '' : 's'}.`
-        )
+        toast.success(`Created ${createdCount} ticket${createdCount === 1 ? '' : 's'}.`)
       } catch (error) {
         const message =
           error instanceof Error ? error.message : 'Failed to create one or more tickets.'
         toast.error(message)
       }
     },
-    [addLocalSystemMessage, drafts, markDraftsCreated, navigateToBoard]
+    [addLocalSystemMessage, drafts, markDraftsCreated, navigateToBoard, setError, setStatus]
   )
 
   const handleClear = useCallback(async () => {
